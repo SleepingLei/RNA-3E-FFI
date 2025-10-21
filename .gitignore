@@ -77,3 +77,9 @@ hariboss/*.csv
 Thumbs.db
 ehthumbs.db
 Desktop.ini
+
+
+# test
+data/
+archive/
+docs/
