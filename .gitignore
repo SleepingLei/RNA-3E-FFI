@@ -1,0 +1,79 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# Data files (too large for git)
+data/raw/
+data/processed/
+*.cif
+*.pdb
+*.prmtop
+*.inpcrd
+*.sdf
+*.h5
+*.hdf5
+
+# Model checkpoints (too large for git)
+models/checkpoints/
+*.pt
+*.pth
+*.ckpt
+
+# Results
+results/
+*.log
+
+# Temporary files
+*.tmp
+temp/
+tmp/
+
+# HARIBOSS data (keep structure, ignore large files)
+hariboss/*.csv
+!hariboss/.gitkeep
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini

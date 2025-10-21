@@ -1,0 +1,126 @@
+Prompt Start
+Role: You are an expert-level scientific software engineer specializing in geometric deep learning for computational chemistry using PyTorch, PyTorch Geometric, e3nn, MDAnalysis, AmberTools, ParmEd, and RDKit.
+Objective: Generate a complete, modular, and well-documented Python codebase for a virtual screening project. The project aims to train an E(3) equivariant Graph Neural Network (E3 GNN) to produce embeddings for RNA binding pockets that align with pre-computed 3D-aware embeddings of their corresponding small molecule ligands from Uni-Mol.
+Please generate the code in separate, logically organized Python scripts as outlined below.
+
+Part 1: Project Setup and Dependencies
+
+1.	Create a requirements.txt file listing all necessary Python packages, including specific versions for: torch, torch-geometric, e3nn, MDAnalysis, parmed, rdkit, unimol-tools, huggingface_hub, pandas, numpy.
+2.	Create a Python script setup_directories.py that generates the project directory structure as specified below(we already have hariboss directory and corresponding csv)
+project_root/
+├── data/
+│   ├── raw/
+│   │   ├── mmCIF/
+│   ├── processed/
+│   │   ├── pockets/
+│   │   ├── amber/
+│   │   ├── graphs/
+│   └── splits/
+├── models/
+├── scripts/
+└── results/
+├──hariboss/
+│    ├──compounds.csv
+│    ├── Complexes.csv
+
+
+Part 2: Data Acquisition and Preprocessing (scripts/01_process_data.py)
+
+Write a script that orchestrates the data preprocessing pipeline. It should contain the following functions:
+1.	download_hariboss_list(output_csv_path): This function should programmatically access http://hariboss.pasteur.cloud/complexes/ and download the complete list of RNA-ligand complexes as a CSV file.
+2.	download_pdb_files(pdb_id_list, output_dir): Given a list of PDB IDs, this function uses Bio.PDB.PDBList to download the corresponding structures in mmCif format into the specified directory.
+3.	define_and_save_pocket(cif_path, ligand_resname, pocket_cutoff, output_pdb_path): This function uses MDAnalysis to:
+○	Load the mmCIF file.
+○	Select RNA atoms ("nucleic") and ligand atoms (f"resname {ligand_resname}").
+○	Define the pocket by selecting RNA atoms around the ligand within pocket_cutoff angstroms.
+○	Write the selected pocket atoms to a new PDB file at output_pdb_path.
+4.	run_ambertools(pocket_pdb_path, amber_output_prefix): This function:
+○	First, runs the pdb4amber command-line tool to clean the input PDB file.
+○	Then, generates a tleap input script string: source leaprc.RNA.OL15\nmol = loadpdb cleaned_pocket.pdb\nsaveamberparm mol {prefix}.prmtop {prefix}.inpcrd\nquit.
+○	Executes tleap with this script using Python's subprocess module.
+5.	A main block that:
+○	Reads the HARIBOSS CSV.
+○	Iterates through each entry, performing the full preprocessing pipeline: define pocket -> save pocket PDB -> run AmberTools. Include robust error handling for each step.
+
+Part 3: Ligand Embedding Generation (scripts/02_embed_ligands.py) 使用Uni-mol2
+
+Write a script to pre-compute and save all ligand embeddings.
+1.	extract_ligand_to_sdf(cif_path, ligand_resname, output_sdf_path): Uses MDAnalysis to select the ligand and RDKit to write it to an SDF file, preserving 3D coordinates.
+2.	A main block that:
+○	Iterates through all complexes in the HARIBOSS CSV.
+○	For each, extracts the ligand to a temporary SDF file.
+○	Collects all SDF file paths.
+○	Instantiates unimol_tools.UniMolRepr(data_type='molecule', remove_hs=False).
+○	Processes all ligand SDFs in a single batch call to get_repr.
+○	Saves the resulting embeddings (cls_repr) into a single HDF5 or dictionary file, mapping a unique complex ID (e.g., pdbid_ligandresname) to its embedding vector.
+
+Part 4: Graph Construction and Dataset (scripts/03_build_dataset.py)
+
+This script defines the data structures for model training.
+1.	build_graph_from_files(pocket_pdb_path, prmtop_path): This is a critical function.
+○	It must load the pocket PDB with RDKit and the prmtop file with ParmEd.
+○	Crucially, it must establish a consistent atom ordering. Use the atom order from the PDB file as the reference. Iterate through RDKit atoms and create a mapping from (resname, resid, atom_name) to a canonical index i.
+○	Use this mapping to align features extracted from both RDKit (element, hybridization, aromaticity) and ParmEd (partial charge, AMBER atom type).
+○	Concatenate these features to create the node feature tensor x.
+○	Use the coordinates from the RDKit Mol object's conformer to create the position tensor pos.
+○	Build the edge_index based on a distance cutoff (e.g., 4.0 Å) between atoms in pos.
+○	Return a torch_geometric.data.Data object containing x, pos, and edge_index.
+2.	RNAPocketDataset(torch_geometric.data.Dataset):
+○	The constructor should take a list of processed data IDs and the path to the pre-computed ligand embeddings file.
+○	The __getitem__ method should load a pre-generated graph file (.pt) for a given ID and its corresponding ligand embedding from the embeddings file. It should return the graph object and the ligand embedding tensor.
+
+Part 5: E3 GNN Model (models/e3_gnn_encoder.py)
+
+Define the PyTorch nn.Module for the pocket encoder.
+1.	E3GNNMessagePassingLayer(nn.Module):
+○	Implement an e3nn based message passing layer.
+○	The forward pass should take node features (h), positions (pos), and edge_index.
+○	It should calculate relative position vectors, compute spherical harmonics (e3nn.o3.spherical_harmonics).
+○	It must include a small MLP (the radial function) that takes interatomic distances and outputs weights for an e3nn.o3.TensorProduct.
+○	The e3nn.o3.TensorProduct combines node features and spherical harmonics.
+○	Aggregate messages and perform a residual update.
+2.	RNAPocketEncoder(nn.Module):
+○	The main model class.
+○	It should have an initial embedding layer to convert the input node features x into an e3nn.Irreps tensor.
+○	It should stack multiple E3GNNMessagePassingLayer blocks.
+○	It must implement the final parameterized weighted pooling layer:
+■	Take the scalar (0e) part of the final node features.
+■	Pass them through an MLP to get attention weights w_i.
+■	Compute the final pocket embedding as the weighted sum of all final node feature vectors.
+■	The forward pass should return this final, invariant pocket embedding vector.
+Part 6: Training Script (scripts/04_train_model.py)
+
+Write the main script to train the model.
+1.	Set up argument parsing for hyperparameters (learning rate, batch size, etc.).
+2.	Initialize the RNAPocketEncoder model, the Adam optimizer, and the ReduceLROnPlateau scheduler.
+3.	Create instances of RNAPocketDataset and torch_geometric.data.DataLoader for training and validation sets.
+4.	Implement the main training loop:
+○	Iterate through epochs.
+○	Training step:
+■	Set model to train mode.
+■	For each batch, get pocket graphs and ligand embeddings.
+■	Pass graphs through the model to get pocket embeddings.
+■	Calculate the MSE loss between predicted pocket embeddings and target ligand embeddings.
+■	Perform backpropagation and optimizer step.
+○	Validation step:
+■	Set model to evaluation mode.
+■	Calculate validation loss on the validation set.
+■	Update the learning rate scheduler and check for early stopping conditions.
+○	Log metrics (train loss, val loss, learning rate) and save the best model checkpoint based on validation loss.
+
+Part 7: Inference Script (scripts/05_run_inference.py)
+
+Write a script to use the trained model for prediction.
+1.	predict_pocket_embedding(pocket_graph, model_checkpoint_path):
+○	Loads the trained RNAPocketEncoder model from a checkpoint.
+○	Takes a single processed pocket graph as input.
+○	Runs a forward pass in evaluation mode to get the pocket embedding.
+○	Returns the embedding as a NumPy array.
+2.	calculate_distance(embedding1, embedding2): A simple function that computes the L2 (Euclidean) distance between two embedding vectors.
+3.	A main block demonstrating a use case:
+○	Load a new, unseen RNA pocket and process it into a graph.
+○	Load the pre-computed ligand embedding library.
+○	Use predict_pocket_embedding to get the embedding for the new pocket.
+○	Iterate through the ligand library, calculate the distance to each ligand, and find the top-k nearest neighbors.
+Prompt End
+
