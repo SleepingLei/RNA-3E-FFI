@@ -36,6 +36,7 @@ RNA-3E-FFI/
 ### 1. Install Dependencies
 
 ```bash
+mamba install pytorch torchvision torchaudio torch-geometric pytorch-cuda=12.1 -c pytorch-nightly -c nvidia
 pip install -r requirements.txt
 ```
 
@@ -44,7 +45,7 @@ pip install -r requirements.txt
 AmberTools is required for processing RNA structures. Install via conda:
 
 ```bash
-conda install -c conda-forge ambertools
+mamba install -c conda-forge ambertools
 ```
 
 ### 3. Setup Directories
