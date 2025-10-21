@@ -12,6 +12,7 @@ import os
 import sys
 import subprocess
 import argparse
+import ast
 from pathlib import Path
 import pandas as pd
 import requests
@@ -290,7 +291,7 @@ def main():
     # Extract PDB IDs (assuming column name is 'pdb_id' or 'PDB_ID' or similar)
     # Adjust column name based on actual CSV structure
     pdb_id_column = None
-    for col in ['pdb_id', 'PDB_ID', 'pdbid', 'PDBID', 'PDB']:
+    for col in ['id', 'pdb_id', 'PDB_ID', 'pdbid', 'PDBID', 'PDB']:
         if col in hariboss_df.columns:
             pdb_id_column = col
             break
@@ -300,15 +301,27 @@ def main():
         print("Error: Could not find PDB ID column in CSV")
         sys.exit(1)
 
-    # Extract ligand residue name column
-    ligand_column = None
-    for col in ['ligand', 'Ligand', 'ligand_resname', 'LIGAND', 'ligand_name']:
-        if col in hariboss_df.columns:
-            ligand_column = col
-            break
+    # Extract ligand residue name from sm_ligand_ids column
+    # The format is like ['ARG_.:B/47:A'] - we need to extract 'ARG'
+    if 'sm_ligand_ids' in hariboss_df.columns:
+        def extract_ligand_name(ligand_ids_str):
+            """Extract ligand residue name from HARIBOSS format."""
+            try:
+                # Parse the string representation of list
+                ligand_list = ast.literal_eval(ligand_ids_str)
+                if ligand_list and len(ligand_list) > 0:
+                    # Extract the first ligand ID and get the residue name (before underscore)
+                    ligand_id = ligand_list[0]
+                    resname = ligand_id.split('_')[0]
+                    return resname
+            except:
+                pass
+            return 'LIG'  # Default fallback
 
-    if ligand_column is None:
-        print("Warning: Could not find ligand column, using default 'LIG'")
+        hariboss_df['ligand_resname'] = hariboss_df['sm_ligand_ids'].apply(extract_ligand_name)
+        ligand_column = 'ligand_resname'
+    else:
+        print("Warning: Could not find sm_ligand_ids column, using default 'LIG'")
         hariboss_df['ligand_resname'] = 'LIG'
         ligand_column = 'ligand_resname'
 
