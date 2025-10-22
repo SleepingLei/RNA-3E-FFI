@@ -280,7 +280,7 @@ def build_and_save_graphs(hariboss_csv, pocket_dir, amber_dir, output_dir, dista
 
     # Find PDB ID and ligand columns
     pdb_id_column = None
-    for col in ['pdb_id', 'PDB_ID', 'pdbid', 'PDBID', 'PDB']:
+    for col in ['id', 'pdb_id', 'PDB_ID', 'pdbid', 'PDBID', 'PDB']:
         if col in hariboss_df.columns:
             pdb_id_column = col
             break
@@ -290,7 +290,7 @@ def build_and_save_graphs(hariboss_csv, pocket_dir, amber_dir, output_dir, dista
         return
 
     ligand_column = None
-    for col in ['ligand', 'Ligand', 'ligand_resname', 'LIGAND', 'ligand_name']:
+    for col in ['sm_ligand_ids', 'ligand', 'Ligand', 'ligand_resname', 'LIGAND', 'ligand_name']:
         if col in hariboss_df.columns:
             ligand_column = col
             break
@@ -315,7 +315,27 @@ def build_and_save_graphs(hariboss_csv, pocket_dir, amber_dir, output_dir, dista
     print(f"{'='*60}\n")
     for idx, row in tqdm(hariboss_df.iterrows(), total=len(hariboss_df)):
         pdb_id = str(row[pdb_id_column]).lower()
-        ligand_resname = str(row[ligand_column])
+
+        # Parse ligand name from sm_ligand_ids if needed
+        ligand_str = str(row[ligand_column])
+        if ligand_column == 'sm_ligand_ids':
+            # Parse format like "['ARG_.:B/1:N']" or "ARG_.:B/1:N"
+            import ast
+            try:
+                ligands = ast.literal_eval(ligand_str)
+                if not isinstance(ligands, list):
+                    ligands = [ligand_str]
+            except:
+                ligands = [ligand_str]
+
+            if ligands and len(ligands) > 0:
+                # Extract "ARG" from "ARG_.:B/1:N"
+                ligand_resname = ligands[0].split('_')[0].split(':')[0]
+            else:
+                ligand_resname = 'LIG'
+        else:
+            ligand_resname = ligand_str
+
         complex_id = f"{pdb_id}_{ligand_resname}"
 
         # Check if graph already exists
