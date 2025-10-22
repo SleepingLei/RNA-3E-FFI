@@ -281,6 +281,10 @@ def main():
 def batch_inference_example():
     """
     Example function demonstrating batch inference on multiple pockets.
+
+    Note: Graph files may have format {pdb_id}_{ligand}_model{N}.pt (with model numbers)
+          but ligand library keys are {pdb_id}_{ligand} (without model numbers).
+          The ligand embeddings are shared across all models of the same complex.
     """
     print("This is an example function for batch inference.")
     print("To use it, modify the code below with your specific paths and requirements.")
@@ -303,19 +307,22 @@ def batch_inference_example():
     # results = {}
 
     # for graph_path in tqdm(list(graph_dir.glob("*.pt"))):
-    #     complex_id = graph_path.stem
+    #     complex_id = graph_path.stem  # e.g., "1aju_ARG_model0"
     #     graph = torch.load(graph_path)
     #
     #     # Predict embedding
     #     embedding = predict_pocket_embedding(graph, model, device)
     #
     #     # Find similar ligands
+    #     # Note: ligand_library keys don't have model numbers
     #     similar = find_similar_ligands(embedding, ligand_library, top_k=10)
     #
     #     results[complex_id] = similar
 
     # # Save results
-    # with open(output_dir / "batch_results.json", 'w') as f:
+    # output_path = Path(output_dir) / "batch_results.json"
+    # output_path.parent.mkdir(parents=True, exist_ok=True)
+    # with open(output_path, 'w') as f:
     #     json.dump(results, f, indent=2)
 
 

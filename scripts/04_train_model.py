@@ -34,28 +34,40 @@ class LigandEmbeddingDataset(torch.utils.data.Dataset):
     def __init__(self, complex_ids, graph_dir, ligand_embeddings_path):
         """
         Args:
-            complex_ids: List of complex IDs to include
+            complex_ids: List of complex IDs to include (may have _model{N} suffix)
             graph_dir: Directory containing graph .pt files
             ligand_embeddings_path: Path to HDF5 file with ligand embeddings
         """
         self.complex_ids = complex_ids
         self.graph_dir = Path(graph_dir)
 
-        # Load ligand embeddings
+        # Load all ligand embeddings (keys don't have model numbers)
         self.ligand_embeddings = {}
         with h5py.File(ligand_embeddings_path, 'r') as f:
-            for complex_id in complex_ids:
-                if complex_id in f:
-                    self.ligand_embeddings[complex_id] = torch.tensor(
-                        f[complex_id][:],
-                        dtype=torch.float
-                    )
+            for key in f.keys():
+                self.ligand_embeddings[key] = torch.tensor(
+                    f[key][:],
+                    dtype=torch.float
+                )
+
+        # Create mapping from complex_id (with model) to embedding key (without model)
+        # Format: {pdb_id}_{ligand}_model{N} -> {pdb_id}_{ligand}
+        self.id_to_embedding_key = {}
+        for complex_id in complex_ids:
+            if '_model' in complex_id:
+                # Extract base ID without model number
+                base_id = '_'.join(complex_id.split('_model')[0].split('_'))
+            else:
+                base_id = complex_id
+
+            if base_id in self.ligand_embeddings:
+                self.id_to_embedding_key[complex_id] = base_id
 
         # Filter to only include complexes with both graph and embedding
         self.valid_ids = []
         for complex_id in complex_ids:
             graph_path = self.graph_dir / f"{complex_id}.pt"
-            if graph_path.exists() and complex_id in self.ligand_embeddings:
+            if graph_path.exists() and complex_id in self.id_to_embedding_key:
                 self.valid_ids.append(complex_id)
 
         print(f"Dataset initialized with {len(self.valid_ids)} valid complexes")
@@ -70,8 +82,10 @@ class LigandEmbeddingDataset(torch.utils.data.Dataset):
         graph_path = self.graph_dir / f"{complex_id}.pt"
         data = torch.load(graph_path)
 
-        # Get ligand embedding
-        ligand_embedding = self.ligand_embeddings[complex_id]
+        # Get ligand embedding using the mapping
+        # complex_id may be "1aju_ARG_model0", but embedding key is "1aju_ARG"
+        embedding_key = self.id_to_embedding_key[complex_id]
+        ligand_embedding = self.ligand_embeddings[embedding_key]
 
         # Store target in data object
         data.y = ligand_embedding
@@ -260,21 +274,60 @@ def main():
             print("Error: Could not find required columns in CSV")
             sys.exit(1)
 
-        # Create complex IDs
+        # Create complex IDs - need to handle models from 01_process_data.py
+        # Format: {pdb_id}_{ligand}_model{N}.pt
+        import glob
+        import ast
+
         complex_ids = []
         for _, row in hariboss_df.iterrows():
             pdb_id = str(row[pdb_id_column]).lower()
-            ligand_resname = str(row[ligand_column])
-            complex_ids.append(f"{pdb_id}_{ligand_resname}")
+
+            # Parse ligand name
+            ligand_str = str(row[ligand_column])
+            if ligand_column == 'sm_ligand_ids':
+                # Parse format like "['ARG_.:B/1:N']" or "ARG_.:B/1:N"
+                try:
+                    ligands = ast.literal_eval(ligand_str)
+                    if not isinstance(ligands, list):
+                        ligands = [ligand_str]
+                except:
+                    ligands = [ligand_str]
+
+                if ligands and len(ligands) > 0:
+                    ligand_resname = ligands[0].split('_')[0].split(':')[0]
+                else:
+                    ligand_resname = ligand_str
+            else:
+                ligand_resname = ligand_str
+
+            complex_base = f"{pdb_id}_{ligand_resname}"
+            complex_ids.append(complex_base)
 
         # Filter to only include complexes with both graph and embedding
+        # Need to find all model variants: {pdb_id}_{ligand}_model*.pt or {pdb_id}_{ligand}.pt
         graph_dir = Path(args.graph_dir)
         valid_ids = []
+
         with h5py.File(args.embeddings_path, 'r') as f:
-            for complex_id in complex_ids:
-                graph_path = graph_dir / f"{complex_id}.pt"
-                if graph_path.exists() and complex_id in f:
-                    valid_ids.append(complex_id)
+            for complex_base in complex_ids:
+                # Try to find model files
+                pattern = str(graph_dir / f"{complex_base}_model*.pt")
+                model_files = sorted(glob.glob(pattern))
+
+                if model_files:
+                    # Found model files, add all of them
+                    # Note: Embeddings use complex_base (without model number)
+                    # but graphs use model_id (with model number)
+                    if complex_base in f:
+                        for model_file in model_files:
+                            model_id = Path(model_file).stem  # e.g., "1aju_ARG_model0"
+                            valid_ids.append(model_id)
+                else:
+                    # Fallback: try without model number
+                    graph_path = graph_dir / f"{complex_base}.pt"
+                    if graph_path.exists() and complex_base in f:
+                        valid_ids.append(complex_base)
 
         print(f"Found {len(valid_ids)} valid complexes")
 

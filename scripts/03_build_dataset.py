@@ -22,6 +22,10 @@ from rdkit import Chem
 from rdkit.Chem import AllChem
 import parmed as pmd
 from tqdm import tqdm
+from multiprocessing import Pool, cpu_count
+from functools import partial
+import glob
+import ast
 
 
 def build_graph_from_files(rna_pdb_path, prmtop_path, distance_cutoff=4.0):
@@ -175,6 +179,119 @@ def build_graph_from_files(rna_pdb_path, prmtop_path, distance_cutoff=4.0):
         return None
 
 
+def process_single_complex(row, pdb_id_column, ligand_column, amber_dir, output_dir, distance_cutoff):
+    """
+    Process a single complex and all its models.
+
+    Args:
+        row: DataFrame row containing complex information
+        pdb_id_column: Name of the PDB ID column
+        ligand_column: Name of the ligand column
+        amber_dir: Path to AMBER files directory
+        output_dir: Path to output directory for graphs
+        distance_cutoff: Distance cutoff for edge construction
+
+    Returns:
+        Tuple of (complex_id, success_count, failed_list)
+    """
+    try:
+        pdb_id = str(row[pdb_id_column]).lower()
+
+        # Parse ligand name from sm_ligand_ids if needed
+        ligand_str = str(row[ligand_column])
+        if ligand_column == 'sm_ligand_ids':
+            # Parse format like "['ARG_.:B/1:N']" or "ARG_.:B/1:N"
+            try:
+                ligands = ast.literal_eval(ligand_str)
+                if not isinstance(ligands, list):
+                    ligands = [ligand_str]
+            except:
+                ligands = [ligand_str]
+
+            if ligands and len(ligands) > 0:
+                # Extract "ARG" from "ARG_.:B/1:N"
+                ligand_resname = ligands[0].split('_')[0].split(':')[0]
+            else:
+                ligand_resname = 'LIG'
+        else:
+            ligand_resname = ligand_str
+
+        complex_id = f"{pdb_id}_{ligand_resname}"
+
+        # Find all model files for this complex (format: {pdb_id}_{ligand}_model{N}_rna.pdb)
+        pattern = str(amber_dir / f"{complex_id}_model*_rna.pdb")
+        model_pdb_files = sorted(glob.glob(pattern))
+
+        if not model_pdb_files:
+            # Fallback: try without model number (for backward compatibility)
+            rna_pdb_path = amber_dir / f"{complex_id}_rna.pdb"
+            rna_prmtop_path = amber_dir / f"{complex_id}_rna.prmtop"
+
+            if rna_pdb_path.exists() and rna_prmtop_path.exists():
+                model_pdb_files = [rna_pdb_path]
+            else:
+                return (complex_id, 0, [(complex_id, "rna_pdb_not_found (searched both formats)")])
+
+        success_count = 0
+        failed_list = []
+
+        # Process each model
+        for rna_pdb_path in model_pdb_files:
+            rna_pdb_path = Path(rna_pdb_path)
+
+            # Extract model number from filename
+            # Format: {pdb_id}_{ligand}_model{N}_rna.pdb
+            stem = rna_pdb_path.stem  # e.g., "1aju_ARG_model0_rna"
+            if "_model" in stem:
+                model_part = stem.split("_model")[1].split("_")[0]  # e.g., "0"
+                complex_model_id = f"{complex_id}_model{model_part}"
+            else:
+                complex_model_id = complex_id
+
+            # Check if graph already exists
+            graph_path = output_dir / f"{complex_model_id}.pt"
+            if graph_path.exists():
+                success_count += 1
+                continue
+
+            # Find corresponding prmtop file
+            rna_prmtop_path = rna_pdb_path.parent / rna_pdb_path.name.replace("_rna.pdb", "_rna.prmtop")
+
+            # Check if prmtop file exists
+            if not rna_prmtop_path.exists():
+                failed_list.append((complex_model_id, "rna_prmtop_not_found"))
+                continue
+
+            # Check if prmtop file is empty or too small
+            prmtop_size = rna_prmtop_path.stat().st_size
+            if prmtop_size == 0:
+                failed_list.append((complex_model_id, "rna_prmtop_empty (0 bytes)"))
+                continue
+            elif prmtop_size < 100:  # Suspiciously small
+                failed_list.append((complex_model_id, f"rna_prmtop_too_small ({prmtop_size} bytes)"))
+                continue
+
+            # Build graph
+            try:
+                data = build_graph_from_files(rna_pdb_path, rna_prmtop_path, distance_cutoff)
+
+                if data is not None:
+                    # Save graph
+                    torch.save(data, graph_path)
+                    success_count += 1
+                else:
+                    failed_list.append((complex_model_id, "graph_construction_failed"))
+
+            except Exception as e:
+                failed_list.append((complex_model_id, str(e)))
+
+        return (complex_id, success_count, failed_list)
+
+    except Exception as e:
+        import traceback
+        return (f"unknown_{row.name}", 0, [(f"unknown_{row.name}", f"Exception: {str(e)}\n{traceback.format_exc()}")])
+
+
 class RNAPocketDataset(Dataset):
     """
     PyTorch Geometric Dataset for RNA binding pockets.
@@ -260,9 +377,9 @@ class RNAPocketDataset(Dataset):
         return data
 
 
-def build_and_save_graphs(hariboss_csv, pocket_dir, amber_dir, output_dir, distance_cutoff=4.0):
+def build_and_save_graphs(hariboss_csv, pocket_dir, amber_dir, output_dir, distance_cutoff=4.0, num_workers=None):
     """
-    Build molecular graphs for RNA structures and save them.
+    Build molecular graphs for RNA structures and save them using multiprocessing.
 
     Note: This function builds graphs from RNA-only PDB and topology files,
           NOT the full pocket (which includes ligands).
@@ -273,6 +390,7 @@ def build_and_save_graphs(hariboss_csv, pocket_dir, amber_dir, output_dir, dista
         amber_dir: Directory containing AMBER topology and RNA PDB files
         output_dir: Directory to save graph files
         distance_cutoff: Distance cutoff for edge construction
+        num_workers: Number of parallel workers (default: CPU count)
     """
     # Read HARIBOSS CSV
     print(f"Reading HARIBOSS CSV from {hariboss_csv}...")
@@ -305,112 +423,52 @@ def build_and_save_graphs(hariboss_csv, pocket_dir, amber_dir, output_dir, dista
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Build graphs
-    success_count = 0
-    failed_graphs = []
+    # Determine number of workers
+    if num_workers is None:
+        num_workers = cpu_count()
 
     print(f"\n{'='*60}")
     print(f"Building RNA-only graphs for {len(hariboss_df)} complexes")
     print(f"Note: Graphs will include RNA atoms only, NOT ligands")
     print(f"Note: Processing all models for each complex")
+    print(f"Using {num_workers} parallel workers")
     print(f"{'='*60}\n")
-    for idx, row in tqdm(hariboss_df.iterrows(), total=len(hariboss_df)):
-        pdb_id = str(row[pdb_id_column]).lower()
 
-        # Parse ligand name from sm_ligand_ids if needed
-        ligand_str = str(row[ligand_column])
-        if ligand_column == 'sm_ligand_ids':
-            # Parse format like "['ARG_.:B/1:N']" or "ARG_.:B/1:N"
-            import ast
-            try:
-                ligands = ast.literal_eval(ligand_str)
-                if not isinstance(ligands, list):
-                    ligands = [ligand_str]
-            except:
-                ligands = [ligand_str]
+    # Create partial function with fixed parameters
+    process_func = partial(
+        process_single_complex,
+        pdb_id_column=pdb_id_column,
+        ligand_column=ligand_column,
+        amber_dir=amber_dir,
+        output_dir=output_dir,
+        distance_cutoff=distance_cutoff
+    )
 
-            if ligands and len(ligands) > 0:
-                # Extract "ARG" from "ARG_.:B/1:N"
-                ligand_resname = ligands[0].split('_')[0].split(':')[0]
-            else:
-                ligand_resname = 'LIG'
-        else:
-            ligand_resname = ligand_str
+    # Process with multiprocessing
+    total_success = 0
+    all_failed = []
 
-        complex_id = f"{pdb_id}_{ligand_resname}"
+    with Pool(processes=num_workers) as pool:
+        # Use imap for progress tracking
+        results = list(tqdm(
+            pool.imap(process_func, [row for _, row in hariboss_df.iterrows()]),
+            total=len(hariboss_df),
+            desc="Processing complexes"
+        ))
 
-        # Find all model files for this complex (format: {pdb_id}_{ligand}_model{N}_rna.pdb)
-        import glob
-        pattern = str(amber_dir / f"{complex_id}_model*_rna.pdb")
-        model_pdb_files = sorted(glob.glob(pattern))
-
-        if not model_pdb_files:
-            # Fallback: try without model number (for backward compatibility)
-            rna_pdb_path = amber_dir / f"{complex_id}_rna.pdb"
-            rna_prmtop_path = amber_dir / f"{complex_id}_rna.prmtop"
-
-            if rna_pdb_path.exists() and rna_prmtop_path.exists():
-                model_pdb_files = [rna_pdb_path]
-            else:
-                failed_graphs.append((complex_id, "rna_pdb_not_found (searched both formats)"))
-                continue
-
-        # Log number of models found
-        if len(model_pdb_files) > 1:
-            print(f"\nFound {len(model_pdb_files)} models for {complex_id}")
-
-        # Process each model
-        for rna_pdb_path in model_pdb_files:
-            rna_pdb_path = Path(rna_pdb_path)
-
-            # Extract model number from filename
-            # Format: {pdb_id}_{ligand}_model{N}_rna.pdb
-            stem = rna_pdb_path.stem  # e.g., "1aju_ARG_model0_rna"
-            if "_model" in stem:
-                model_part = stem.split("_model")[1].split("_")[0]  # e.g., "0"
-                model_id = f"_model{model_part}"
-                complex_model_id = f"{complex_id}_model{model_part}"
-            else:
-                model_id = ""
-                complex_model_id = complex_id
-
-            # Check if graph already exists
-            graph_path = output_dir / f"{complex_model_id}.pt"
-            if graph_path.exists():
-                success_count += 1
-                continue
-
-            # Find corresponding prmtop file
-            rna_prmtop_path = rna_pdb_path.parent / rna_pdb_path.name.replace("_rna.pdb", "_rna.prmtop")
-
-            # Check if prmtop file exists
-            if not rna_prmtop_path.exists():
-                failed_graphs.append((complex_model_id, "rna_prmtop_not_found"))
-                continue
-
-            # Build graph
-            try:
-                data = build_graph_from_files(rna_pdb_path, rna_prmtop_path, distance_cutoff)
-
-                if data is not None:
-                    # Save graph
-                    torch.save(data, graph_path)
-                    success_count += 1
-                else:
-                    failed_graphs.append((complex_model_id, "graph_construction_failed"))
-
-            except Exception as e:
-                print(f"Error processing {complex_model_id}: {e}")
-                failed_graphs.append((complex_model_id, str(e)))
+    # Aggregate results
+    for complex_id, success_count, failed_list in results:
+        total_success += success_count
+        all_failed.extend(failed_list)
 
     # Print summary
     print(f"\n{'='*60}")
     print(f"Graph construction complete!")
-    print(f"Successfully built: {success_count}/{len(hariboss_df)}")
-    print(f"Failed: {len(failed_graphs)}")
+    print(f"Successfully built: {total_success} graphs")
+    print(f"Failed: {len(all_failed)}")
 
-    if failed_graphs:
-        failed_df = pd.DataFrame(failed_graphs, columns=['complex_id', 'reason'])
+    if all_failed:
+        failed_df = pd.DataFrame(all_failed, columns=['complex_id', 'reason'])
         failed_path = output_dir.parent / "failed_graph_construction.csv"
         failed_df.to_csv(failed_path, index=False)
         print(f"Failed graphs saved to {failed_path}")
@@ -429,6 +487,8 @@ def main():
                         help="Output directory for graph files")
     parser.add_argument("--distance_cutoff", type=float, default=4.0,
                         help="Distance cutoff for edge construction (Angstroms)")
+    parser.add_argument("--num_workers", type=int, default=None,
+                        help="Number of parallel workers (default: CPU count)")
 
     args = parser.parse_args()
 
@@ -437,7 +497,8 @@ def main():
         args.pocket_dir,
         args.amber_dir,
         args.output_dir,
-        args.distance_cutoff
+        args.distance_cutoff,
+        args.num_workers
     )
 
 
