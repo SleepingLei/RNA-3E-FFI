@@ -2,8 +2,12 @@
 """
 Graph Construction and Dataset Creation
 
-This script builds molecular graphs from processed RNA pockets and creates
-PyTorch Geometric datasets for training.
+This script builds molecular graphs from processed RNA structures (RNA-only,
+NOT including ligands) and creates PyTorch Geometric datasets for training.
+
+The graphs are built from:
+  - RNA PDB files: {pdb_id}_{ligand_name}_model{N}_rna.pdb
+  - RNA topology files: {pdb_id}_{ligand_name}_model{N}_rna.prmtop
 """
 import os
 import sys
@@ -20,15 +24,15 @@ import parmed as pmd
 from tqdm import tqdm
 
 
-def build_graph_from_files(pocket_pdb_path, prmtop_path, distance_cutoff=4.0):
+def build_graph_from_files(rna_pdb_path, prmtop_path, distance_cutoff=4.0):
     """
-    Build a molecular graph from pocket PDB and AMBER topology files.
+    Build a molecular graph from RNA PDB and AMBER topology files.
 
     This function creates a consistent atom ordering using the PDB file as reference,
     then extracts features from both RDKit and ParmEd.
 
     Args:
-        pocket_pdb_path: Path to pocket PDB file
+        rna_pdb_path: Path to RNA PDB file
         prmtop_path: Path to AMBER prmtop file
         distance_cutoff: Distance cutoff for edge construction (Angstroms)
 
@@ -36,17 +40,17 @@ def build_graph_from_files(pocket_pdb_path, prmtop_path, distance_cutoff=4.0):
         torch_geometric.data.Data object with node features, positions, and edges
     """
     try:
-        # Load pocket with RDKit
-        mol = Chem.MolFromPDBFile(str(pocket_pdb_path), removeHs=False, sanitize=False)
+        # Load RNA with RDKit
+        mol = Chem.MolFromPDBFile(str(rna_pdb_path), removeHs=False, sanitize=False)
         if mol is None:
-            print(f"Error: RDKit failed to load {pocket_pdb_path}")
+            print(f"Error: RDKit failed to load {rna_pdb_path}")
             return None
 
         # Try to sanitize
         try:
             Chem.SanitizeMol(mol)
         except:
-            print(f"Warning: Sanitization failed for {pocket_pdb_path}")
+            print(f"Warning: Sanitization failed for {rna_pdb_path}")
 
         # Load AMBER topology with ParmEd
         amber_parm = pmd.load_file(str(prmtop_path))
@@ -165,7 +169,7 @@ def build_graph_from_files(pocket_pdb_path, prmtop_path, distance_cutoff=4.0):
         return data
 
     except Exception as e:
-        print(f"Error building graph from {pocket_pdb_path}: {e}")
+        print(f"Error building graph from {rna_pdb_path}: {e}")
         import traceback
         traceback.print_exc()
         return None
@@ -258,12 +262,15 @@ class RNAPocketDataset(Dataset):
 
 def build_and_save_graphs(hariboss_csv, pocket_dir, amber_dir, output_dir, distance_cutoff=4.0):
     """
-    Build molecular graphs for all complexes and save them.
+    Build molecular graphs for RNA structures and save them.
+
+    Note: This function builds graphs from RNA-only PDB and topology files,
+          NOT the full pocket (which includes ligands).
 
     Args:
         hariboss_csv: Path to HARIBOSS CSV file
-        pocket_dir: Directory containing pocket PDB files
-        amber_dir: Directory containing AMBER topology files
+        pocket_dir: Directory containing pocket PDB files (not used, kept for compatibility)
+        amber_dir: Directory containing AMBER topology and RNA PDB files
         output_dir: Directory to save graph files
         distance_cutoff: Distance cutoff for edge construction
     """
@@ -302,7 +309,10 @@ def build_and_save_graphs(hariboss_csv, pocket_dir, amber_dir, output_dir, dista
     success_count = 0
     failed_graphs = []
 
-    print(f"\nBuilding graphs for {len(hariboss_df)} complexes...")
+    print(f"\n{'='*60}")
+    print(f"Building RNA-only graphs for {len(hariboss_df)} complexes")
+    print(f"Note: Graphs will include RNA atoms only, NOT ligands")
+    print(f"{'='*60}\n")
     for idx, row in tqdm(hariboss_df.iterrows(), total=len(hariboss_df)):
         pdb_id = str(row[pdb_id_column]).lower()
         ligand_resname = str(row[ligand_column])
@@ -314,22 +324,22 @@ def build_and_save_graphs(hariboss_csv, pocket_dir, amber_dir, output_dir, dista
             success_count += 1
             continue
 
-        # Define file paths
-        pocket_pdb_path = pocket_dir / f"{complex_id}_pocket.pdb"
-        prmtop_path = amber_dir / f"{complex_id}.prmtop"
+        # Define file paths - use RNA-only files
+        rna_pdb_path = amber_dir / f"{complex_id}_rna.pdb"
+        rna_prmtop_path = amber_dir / f"{complex_id}_rna.prmtop"
 
         # Check if files exist
-        if not pocket_pdb_path.exists():
-            failed_graphs.append((complex_id, "pocket_pdb_not_found"))
+        if not rna_pdb_path.exists():
+            failed_graphs.append((complex_id, "rna_pdb_not_found"))
             continue
 
-        if not prmtop_path.exists():
-            failed_graphs.append((complex_id, "prmtop_not_found"))
+        if not rna_prmtop_path.exists():
+            failed_graphs.append((complex_id, "rna_prmtop_not_found"))
             continue
 
         # Build graph
         try:
-            data = build_graph_from_files(pocket_pdb_path, prmtop_path, distance_cutoff)
+            data = build_graph_from_files(rna_pdb_path, rna_prmtop_path, distance_cutoff)
 
             if data is not None:
                 # Save graph
