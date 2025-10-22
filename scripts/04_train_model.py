@@ -176,7 +176,7 @@ def main():
                         help="Input feature dimension")
     parser.add_argument("--hidden_irreps", type=str, default="32x0e + 16x1o + 8x2e",
                         help="Hidden layer irreps")
-    parser.add_argument("--output_dim", type=int, default=512,
+    parser.add_argument("--output_dim", type=int, default=1536,
                         help="Output embedding dimension")
     parser.add_argument("--num_layers", type=int, default=4,
                         help="Number of message passing layers")

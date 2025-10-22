@@ -175,7 +175,7 @@ def main():
                         help="Path to HARIBOSS complexes CSV file")
     parser.add_argument("--compounds_csv", type=str, default="hariboss/compounds.csv",
                         help="Path to compounds CSV file with SMILES")
-    parser.add_argument("--output_dir", type=str, default="data/processed",
+    parser.add_argument("--output_dir", type=str, default="data/processed/ligands",
                         help="Output directory for processed data")
     parser.add_argument("--output_h5", type=str, default="data/processed/ligand_embeddings.h5",
                         help="Output HDF5 file for embeddings")
@@ -248,6 +248,7 @@ def main():
         original_smiles = compound_smiles_map[ligand_id]
 
         # Process SMILES with obabel to adjust pH
+
         processed_smiles = process_smiles_with_obabel(original_smiles, ph=args.ph)
         if processed_smiles is None:
             # If obabel fails, use original SMILES

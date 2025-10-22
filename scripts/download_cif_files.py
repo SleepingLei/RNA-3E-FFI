@@ -23,7 +23,7 @@ def download_cif(pdb_id: str, output_dir: Path, proxy_url: str = None) -> bool:
 
     try:
         # 构建 curl 命令
-        cmd = ["curl", "-o", str(output_file), "--max-time", "10", url]
+        cmd = ["curl", "-o", str(output_file), "--max-time", "1000", url]
         
         # 如果有代理
         if proxy_url:
