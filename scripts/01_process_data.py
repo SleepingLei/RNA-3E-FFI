@@ -746,10 +746,27 @@ quit
 
 
 def process_complex_v2(pdb_id: str, ligand_name: str, hariboss_dir: Path,
-                      output_dir: Path, pocket_cutoff: float) -> Dict:
+                      output_dir: Path, pocket_cutoff: float,
+                      parameterize_rna: bool = True,
+                      parameterize_ligand: bool = False,
+                      parameterize_modified_rna: bool = False,
+                      parameterize_protein: bool = False) -> Dict:
     """
     Process a single complex with new strategy
-    Returns dict with processing results
+
+    Args:
+        pdb_id: PDB ID of the complex
+        ligand_name: Ligand residue name
+        hariboss_dir: Directory containing HARIBOSS data
+        output_dir: Output directory
+        pocket_cutoff: Cutoff distance for pocket definition
+        parameterize_rna: Whether to parameterize RNA (default: True)
+        parameterize_ligand: Whether to parameterize ligand (default: False)
+        parameterize_modified_rna: Whether to parameterize modified RNA (default: False)
+        parameterize_protein: Whether to parameterize protein (default: False)
+
+    Returns:
+        Dict with processing results
     """
     print(f"\n{'='*70}")
     print(f"Processing: {pdb_id} - {ligand_name}")
@@ -813,7 +830,7 @@ def process_complex_v2(pdb_id: str, ligand_name: str, hariboss_dir: Path,
         output_prefix.parent.mkdir(parents=True, exist_ok=True)
 
         # RNA
-        if 'rna' in pocket_components and len(pocket_components['rna']) > 0:
+        if parameterize_rna and 'rna' in pocket_components and len(pocket_components['rna']) > 0:
             success, prmtop, inpcrd = parameterize_rna(
                 pocket_components['rna'],
                 output_prefix
@@ -825,9 +842,19 @@ def process_complex_v2(pdb_id: str, ligand_name: str, hariboss_dir: Path,
                 'prmtop': str(prmtop) if prmtop else None,
                 'inpcrd': str(inpcrd) if inpcrd else None
             }
+        elif 'rna' in pocket_components and len(pocket_components['rna']) > 0:
+            print(f"  ⏭  Skipping RNA parameterization (disabled)")
+            result['components']['rna'] = {
+                'success': False,
+                'atoms': len(pocket_components['rna']),
+                'residues': len(pocket_components['rna'].residues),
+                'prmtop': None,
+                'inpcrd': None,
+                'skipped': True
+            }
 
         # Ligand
-        if 'ligand' in pocket_components and len(pocket_components['ligand']) > 0:
+        if parameterize_ligand and 'ligand' in pocket_components and len(pocket_components['ligand']) > 0:
             success, prmtop, inpcrd = parameterize_ligand_gaff(
                 pocket_components['ligand'],
                 ligand_name,
@@ -839,9 +866,18 @@ def process_complex_v2(pdb_id: str, ligand_name: str, hariboss_dir: Path,
                 'prmtop': str(prmtop) if prmtop else None,
                 'inpcrd': str(inpcrd) if inpcrd else None
             }
+        elif 'ligand' in pocket_components and len(pocket_components['ligand']) > 0:
+            print(f"  ⏭  Skipping ligand parameterization (disabled)")
+            result['components']['ligand'] = {
+                'success': False,
+                'atoms': len(pocket_components['ligand']),
+                'prmtop': None,
+                'inpcrd': None,
+                'skipped': True
+            }
 
         # Protein
-        if 'protein' in pocket_components and len(pocket_components['protein']) > 0:
+        if parameterize_protein and 'protein' in pocket_components and len(pocket_components['protein']) > 0:
             success, prmtop, inpcrd = parameterize_protein(
                 pocket_components['protein'],
                 output_prefix
@@ -853,9 +889,19 @@ def process_complex_v2(pdb_id: str, ligand_name: str, hariboss_dir: Path,
                 'prmtop': str(prmtop) if prmtop else None,
                 'inpcrd': str(inpcrd) if inpcrd else None
             }
+        elif 'protein' in pocket_components and len(pocket_components['protein']) > 0:
+            print(f"  ⏭  Skipping protein parameterization (disabled)")
+            result['components']['protein'] = {
+                'success': False,
+                'atoms': len(pocket_components['protein']),
+                'residues': len(pocket_components['protein'].residues),
+                'prmtop': None,
+                'inpcrd': None,
+                'skipped': True
+            }
 
         # Modified RNA
-        if 'modified_rna' in pocket_components and len(pocket_components['modified_rna']) > 0:
+        if parameterize_modified_rna and 'modified_rna' in pocket_components and len(pocket_components['modified_rna']) > 0:
             success, prmtop, inpcrd = parameterize_modified_rna(
                 pocket_components['modified_rna'],
                 output_prefix
@@ -866,6 +912,16 @@ def process_complex_v2(pdb_id: str, ligand_name: str, hariboss_dir: Path,
                 'residues': len(pocket_components['modified_rna'].residues),
                 'prmtop': str(prmtop) if prmtop else None,
                 'inpcrd': str(inpcrd) if inpcrd else None
+            }
+        elif 'modified_rna' in pocket_components and len(pocket_components['modified_rna']) > 0:
+            print(f"  ⏭  Skipping modified RNA parameterization (disabled)")
+            result['components']['modified_rna'] = {
+                'success': False,
+                'atoms': len(pocket_components['modified_rna']),
+                'residues': len(pocket_components['modified_rna'].residues),
+                'prmtop': None,
+                'inpcrd': None,
+                'skipped': True
             }
 
         # Check if at least RNA was successful
@@ -898,6 +954,18 @@ def main():
     parser.add_argument("--max_complexes", type=int, default=None,
                        help="Maximum number of complexes to process (for testing)")
 
+    # Parameterization control flags
+    parser.add_argument("--parameterize_rna", action="store_true", default=True,
+                       help="Parameterize RNA components (default: True)")
+    parser.add_argument("--no_parameterize_rna", action="store_false", dest="parameterize_rna",
+                       help="Skip RNA parameterization")
+    parser.add_argument("--parameterize_ligand", action="store_true", default=False,
+                       help="Parameterize ligand components (default: False)")
+    parser.add_argument("--parameterize_modified_rna", action="store_true", default=False,
+                       help="Parameterize modified RNA components (default: False)")
+    parser.add_argument("--parameterize_protein", action="store_true", default=False,
+                       help="Parameterize protein components (default: False)")
+
     args = parser.parse_args()
 
     # Read HARIBOSS CSV
@@ -914,6 +982,16 @@ def main():
     hariboss_dir = Path(args.hariboss_dir)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Print parameterization settings
+    print(f"\n{'='*70}")
+    print(f"Parameterization Settings")
+    print(f"{'='*70}")
+    print(f"  RNA:           {'✓ Enabled' if args.parameterize_rna else '✗ Disabled'}")
+    print(f"  Ligand:        {'✓ Enabled' if args.parameterize_ligand else '✗ Disabled'}")
+    print(f"  Modified RNA:  {'✓ Enabled' if args.parameterize_modified_rna else '✗ Disabled'}")
+    print(f"  Protein:       {'✓ Enabled' if args.parameterize_protein else '✗ Disabled'}")
+    print(f"{'='*70}\n")
 
     # Process each complex
     results = []
@@ -944,7 +1022,11 @@ def main():
             result = process_complex_v2(
                 pdb_id, ligand_info,
                 hariboss_dir, output_dir,
-                args.pocket_cutoff
+                args.pocket_cutoff,
+                parameterize_rna=args.parameterize_rna,
+                parameterize_ligand=args.parameterize_ligand,
+                parameterize_modified_rna=args.parameterize_modified_rna,
+                parameterize_protein=args.parameterize_protein
             )
 
             results.append(result)
