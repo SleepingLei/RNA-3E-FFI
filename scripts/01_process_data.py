@@ -357,7 +357,7 @@ def parameterize_ligand_gaff(ligand_atoms: mda.AtomGroup, ligand_name: str,
 
     Workflow:
     1. Save ligand to PDB
-    2. Run antechamber to assign atom types and charges
+    2. Run antechamber to assign atom types and calculate charges (with charge detection and fallback)
     3. Run parmchk2 to generate missing parameters
     4. Use tleap to create prmtop/inpcrd with GAFF
 
@@ -387,35 +387,81 @@ def parameterize_ligand_gaff(ligand_atoms: mda.AtomGroup, ligand_name: str,
     prmtop_file = output_prefix.parent / f"{output_prefix.stem}_ligand.prmtop"
     inpcrd_file = output_prefix.parent / f"{output_prefix.stem}_ligand.inpcrd"
 
+    # Calculate total number of electrons to guess the charge
+    # Common atomic numbers
+    atomic_numbers = {'H': 1, 'C': 6, 'N': 7, 'O': 8, 'P': 15, 'S': 16, 'F': 9, 'Cl': 17, 'Br': 35}
+    total_electrons = sum(atomic_numbers.get(atom.element, 0) for atom in ligand_atoms)
+
+    # Try different charge values if electrons are odd
+    possible_charges = [0]  # Default neutral
+    if total_electrons % 2 == 1:  # Odd electrons, likely charged
+        possible_charges = [1, -1, 0]  # Try +1, -1, then neutral
+        print(f"  Note: Odd electron count ({total_electrons}), will try charges: {possible_charges}")
+
     try:
         # Step 1: Run antechamber to assign atom types and calculate charges
-        print(f"  Running antechamber (charge method: {charge_method})...")
-        antechamber_cmd = [
-            "antechamber",
-            "-i", str(ligand_pdb),
-            "-fi", "pdb",
-            "-o", str(mol2_file),
-            "-fo", "mol2",
-            "-c", charge_method,  # AM1-BCC charges
-            "-at", "gaff2",       # GAFF2 atom types
-            "-rn", ligand_name,
-            "-nc", "0",           # Net charge (0 for neutral, adjust if needed)
-            "-pf", "y"            # Remove intermediate files
-        ]
+        # Try different charges if needed
+        success = False
+        for net_charge in possible_charges:
+            print(f"  Running antechamber (charge method: {charge_method}, nc: {net_charge})...")
+            antechamber_cmd = [
+                "antechamber",
+                "-i", ligand_pdb.name,  # Use filename only since we're using cwd
+                "-fi", "pdb",
+                "-o", mol2_file.name,  # Use filename only since we're using cwd
+                "-fo", "mol2",
+                "-c", charge_method,  # AM1-BCC charges
+                "-at", "gaff2",       # GAFF2 atom types
+                "-rn", ligand_name,
+                "-nc", str(net_charge),
+                "-pf", "y"            # Remove intermediate files
+            ]
 
-        result = subprocess.run(
-            antechamber_cmd,
-            capture_output=True,
-            text=True,
-            timeout=600,
-            cwd=str(output_prefix.parent)
-        )
+            result = subprocess.run(
+                antechamber_cmd,
+                capture_output=True,
+                text=True,
+                timeout=600,
+                cwd=str(output_prefix.parent)
+            )
 
-        if result.returncode != 0 or not mol2_file.exists():
-            print(f"  ✗ Antechamber failed")
-            if result.stderr:
-                print(f"    Error: {result.stderr[:500]}")
-            return False, None, None
+            if result.returncode == 0 and mol2_file.exists():
+                print(f"  ✓ Antechamber succeeded with net charge {net_charge}")
+                success = True
+                break
+            else:
+                print(f"  ⚠️  Antechamber failed with nc={net_charge}")
+                if mol2_file.exists():
+                    mol2_file.unlink()  # Clean up partial file
+
+        if not success:
+            # Final fallback: try with gas-phase charges (no QM calculation)
+            print(f"  Trying fallback with gas-phase charges...")
+            antechamber_cmd = [
+                "antechamber",
+                "-i", ligand_pdb.name,
+                "-fi", "pdb",
+                "-o", mol2_file.name,
+                "-fo", "mol2",
+                "-c", "gas",  # Gas-phase charges (faster, no QM)
+                "-at", "gaff2",
+                "-rn", ligand_name,
+                "-pf", "y"
+            ]
+
+            result = subprocess.run(
+                antechamber_cmd,
+                capture_output=True,
+                text=True,
+                timeout=600,
+                cwd=str(output_prefix.parent)
+            )
+
+            if result.returncode != 0 or not mol2_file.exists():
+                print(f"  ✗ All antechamber attempts failed")
+                if result.stderr:
+                    print(f"    Error: {result.stderr[:500]}")
+                return False, None, None
 
         print(f"  ✓ Generated {mol2_file.name}")
 
@@ -423,9 +469,9 @@ def parameterize_ligand_gaff(ligand_atoms: mda.AtomGroup, ligand_name: str,
         print(f"  Running parmchk2...")
         parmchk_cmd = [
             "parmchk2",
-            "-i", str(mol2_file),
+            "-i", mol2_file.name,  # Use filename only since we're using cwd
             "-f", "mol2",
-            "-o", str(frcmod_file),
+            "-o", frcmod_file.name,  # Use filename only since we're using cwd
             "-s", "gaff2"
         ]
 
@@ -535,9 +581,9 @@ def parameterize_modified_rna(modified_rna_atoms: mda.AtomGroup, output_prefix: 
             print(f"    Processing {resname}:{resid}...")
             antechamber_cmd = [
                 "antechamber",
-                "-i", str(residue_pdb),
+                "-i", residue_pdb.name,  # Use filename only since we're using cwd
                 "-fi", "pdb",
-                "-o", str(mol2_file),
+                "-o", mol2_file.name,  # Use filename only since we're using cwd
                 "-fo", "mol2",
                 "-c", "bcc",
                 "-at", "gaff2",
@@ -561,9 +607,9 @@ def parameterize_modified_rna(modified_rna_atoms: mda.AtomGroup, output_prefix: 
             # Run parmchk2
             parmchk_cmd = [
                 "parmchk2",
-                "-i", str(mol2_file),
+                "-i", mol2_file.name,  # Use filename only since we're using cwd
                 "-f", "mol2",
-                "-o", str(frcmod_file),
+                "-o", frcmod_file.name,  # Use filename only since we're using cwd
                 "-s", "gaff2"
             ]
 
