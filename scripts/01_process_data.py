@@ -748,10 +748,10 @@ quit
 def process_single_model(pdb_id: str, ligand_name: str, model_id: int,
                         universe: mda.Universe, output_dir: Path,
                         pocket_cutoff: float,
-                        parameterize_rna: bool = True,
-                        parameterize_ligand: bool = False,
-                        parameterize_modified_rna: bool = False,
-                        parameterize_protein: bool = False) -> Dict:
+                        do_parameterize_rna: bool = True,
+                        do_parameterize_ligand: bool = False,
+                        do_parameterize_modified_rna: bool = False,
+                        do_parameterize_protein: bool = False) -> Dict:
     """
     Process a single model from a structure
 
@@ -762,10 +762,10 @@ def process_single_model(pdb_id: str, ligand_name: str, model_id: int,
         universe: MDAnalysis Universe object at the specific frame
         output_dir: Output directory
         pocket_cutoff: Cutoff distance for pocket definition
-        parameterize_rna: Whether to parameterize RNA (default: True)
-        parameterize_ligand: Whether to parameterize ligand (default: False)
-        parameterize_modified_rna: Whether to parameterize modified RNA (default: False)
-        parameterize_protein: Whether to parameterize protein (default: False)
+        do_parameterize_rna: Whether to parameterize RNA (default: True)
+        do_parameterize_ligand: Whether to parameterize ligand (default: False)
+        do_parameterize_modified_rna: Whether to parameterize modified RNA (default: False)
+        do_parameterize_protein: Whether to parameterize protein (default: False)
 
     Returns:
         Dict with processing results for this model
@@ -810,7 +810,7 @@ def process_single_model(pdb_id: str, ligand_name: str, model_id: int,
         output_prefix.parent.mkdir(parents=True, exist_ok=True)
 
         # RNA
-        if parameterize_rna and 'rna' in pocket_components and len(pocket_components['rna']) > 0:
+        if do_parameterize_rna and 'rna' in pocket_components and len(pocket_components['rna']) > 0:
             success, prmtop, inpcrd = parameterize_rna(
                 pocket_components['rna'],
                 output_prefix
@@ -834,7 +834,7 @@ def process_single_model(pdb_id: str, ligand_name: str, model_id: int,
             }
 
         # Ligand
-        if parameterize_ligand and 'ligand' in pocket_components and len(pocket_components['ligand']) > 0:
+        if do_parameterize_ligand and 'ligand' in pocket_components and len(pocket_components['ligand']) > 0:
             success, prmtop, inpcrd = parameterize_ligand_gaff(
                 pocket_components['ligand'],
                 ligand_name,
@@ -857,7 +857,7 @@ def process_single_model(pdb_id: str, ligand_name: str, model_id: int,
             }
 
         # Protein
-        if parameterize_protein and 'protein' in pocket_components and len(pocket_components['protein']) > 0:
+        if do_parameterize_protein and 'protein' in pocket_components and len(pocket_components['protein']) > 0:
             success, prmtop, inpcrd = parameterize_protein(
                 pocket_components['protein'],
                 output_prefix
@@ -881,7 +881,7 @@ def process_single_model(pdb_id: str, ligand_name: str, model_id: int,
             }
 
         # Modified RNA
-        if parameterize_modified_rna and 'modified_rna' in pocket_components and len(pocket_components['modified_rna']) > 0:
+        if do_parameterize_modified_rna and 'modified_rna' in pocket_components and len(pocket_components['modified_rna']) > 0:
             success, prmtop, inpcrd = parameterize_modified_rna(
                 pocket_components['modified_rna'],
                 output_prefix
@@ -986,10 +986,10 @@ def process_complex_v2(pdb_id: str, ligand_name: str, hariboss_dir: Path,
             model_result = process_single_model(
                 pdb_id, ligand_name, model_idx, u, output_dir,
                 pocket_cutoff,
-                parameterize_rna=parameterize_rna,
-                parameterize_ligand=parameterize_ligand,
-                parameterize_modified_rna=parameterize_modified_rna,
-                parameterize_protein=parameterize_protein
+                do_parameterize_rna=parameterize_rna,
+                do_parameterize_ligand=parameterize_ligand,
+                do_parameterize_modified_rna=parameterize_modified_rna,
+                do_parameterize_protein=parameterize_protein
             )
 
             all_results.append(model_result)
