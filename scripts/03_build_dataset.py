@@ -312,6 +312,7 @@ def build_and_save_graphs(hariboss_csv, pocket_dir, amber_dir, output_dir, dista
     print(f"\n{'='*60}")
     print(f"Building RNA-only graphs for {len(hariboss_df)} complexes")
     print(f"Note: Graphs will include RNA atoms only, NOT ligands")
+    print(f"Note: Processing all models for each complex")
     print(f"{'='*60}\n")
     for idx, row in tqdm(hariboss_df.iterrows(), total=len(hariboss_df)):
         pdb_id = str(row[pdb_id_column]).lower()
@@ -338,39 +339,69 @@ def build_and_save_graphs(hariboss_csv, pocket_dir, amber_dir, output_dir, dista
 
         complex_id = f"{pdb_id}_{ligand_resname}"
 
-        # Check if graph already exists
-        graph_path = output_dir / f"{complex_id}.pt"
-        if graph_path.exists():
-            success_count += 1
-            continue
+        # Find all model files for this complex (format: {pdb_id}_{ligand}_model{N}_rna.pdb)
+        import glob
+        pattern = str(amber_dir / f"{complex_id}_model*_rna.pdb")
+        model_pdb_files = sorted(glob.glob(pattern))
 
-        # Define file paths - use RNA-only files
-        rna_pdb_path = amber_dir / f"{complex_id}_rna.pdb"
-        rna_prmtop_path = amber_dir / f"{complex_id}_rna.prmtop"
+        if not model_pdb_files:
+            # Fallback: try without model number (for backward compatibility)
+            rna_pdb_path = amber_dir / f"{complex_id}_rna.pdb"
+            rna_prmtop_path = amber_dir / f"{complex_id}_rna.prmtop"
 
-        # Check if files exist
-        if not rna_pdb_path.exists():
-            failed_graphs.append((complex_id, "rna_pdb_not_found"))
-            continue
-
-        if not rna_prmtop_path.exists():
-            failed_graphs.append((complex_id, "rna_prmtop_not_found"))
-            continue
-
-        # Build graph
-        try:
-            data = build_graph_from_files(rna_pdb_path, rna_prmtop_path, distance_cutoff)
-
-            if data is not None:
-                # Save graph
-                torch.save(data, graph_path)
-                success_count += 1
+            if rna_pdb_path.exists() and rna_prmtop_path.exists():
+                model_pdb_files = [rna_pdb_path]
             else:
-                failed_graphs.append((complex_id, "graph_construction_failed"))
+                failed_graphs.append((complex_id, "rna_pdb_not_found (searched both formats)"))
+                continue
 
-        except Exception as e:
-            print(f"Error processing {complex_id}: {e}")
-            failed_graphs.append((complex_id, str(e)))
+        # Log number of models found
+        if len(model_pdb_files) > 1:
+            print(f"\nFound {len(model_pdb_files)} models for {complex_id}")
+
+        # Process each model
+        for rna_pdb_path in model_pdb_files:
+            rna_pdb_path = Path(rna_pdb_path)
+
+            # Extract model number from filename
+            # Format: {pdb_id}_{ligand}_model{N}_rna.pdb
+            stem = rna_pdb_path.stem  # e.g., "1aju_ARG_model0_rna"
+            if "_model" in stem:
+                model_part = stem.split("_model")[1].split("_")[0]  # e.g., "0"
+                model_id = f"_model{model_part}"
+                complex_model_id = f"{complex_id}_model{model_part}"
+            else:
+                model_id = ""
+                complex_model_id = complex_id
+
+            # Check if graph already exists
+            graph_path = output_dir / f"{complex_model_id}.pt"
+            if graph_path.exists():
+                success_count += 1
+                continue
+
+            # Find corresponding prmtop file
+            rna_prmtop_path = rna_pdb_path.parent / rna_pdb_path.name.replace("_rna.pdb", "_rna.prmtop")
+
+            # Check if prmtop file exists
+            if not rna_prmtop_path.exists():
+                failed_graphs.append((complex_model_id, "rna_prmtop_not_found"))
+                continue
+
+            # Build graph
+            try:
+                data = build_graph_from_files(rna_pdb_path, rna_prmtop_path, distance_cutoff)
+
+                if data is not None:
+                    # Save graph
+                    torch.save(data, graph_path)
+                    success_count += 1
+                else:
+                    failed_graphs.append((complex_model_id, "graph_construction_failed"))
+
+            except Exception as e:
+                print(f"Error processing {complex_model_id}: {e}")
+                failed_graphs.append((complex_model_id, str(e)))
 
     # Print summary
     print(f"\n{'='*60}")
