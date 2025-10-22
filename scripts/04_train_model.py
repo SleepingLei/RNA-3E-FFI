@@ -117,6 +117,12 @@ def train_epoch(model, loader, optimizer, device):
         pocket_embedding = model(batch)
         target_embedding = batch.y
 
+        # Reshape target if needed (PyG DataLoader flattens batch.y)
+        # Expected: [batch_size, embedding_dim]
+        if target_embedding.dim() == 1:
+            batch_size = batch.num_graphs if hasattr(batch, 'num_graphs') else pocket_embedding.size(0)
+            target_embedding = target_embedding.view(batch_size, -1)
+
         # MSE loss
         loss = F.mse_loss(pocket_embedding, target_embedding)
 
@@ -155,6 +161,12 @@ def evaluate(model, loader, device):
             # Forward pass
             pocket_embedding = model(batch)
             target_embedding = batch.y
+
+            # Reshape target if needed (PyG DataLoader flattens batch.y)
+            # Expected: [batch_size, embedding_dim]
+            if target_embedding.dim() == 1:
+                batch_size = batch.num_graphs if hasattr(batch, 'num_graphs') else pocket_embedding.size(0)
+                target_embedding = target_embedding.view(batch_size, -1)
 
             # MSE loss
             mse_loss = F.mse_loss(pocket_embedding, target_embedding)
