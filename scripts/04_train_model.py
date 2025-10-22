@@ -24,7 +24,6 @@ import h5py
 # Add models directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from models.e3_gnn_encoder import RNAPocketEncoder
-from scripts.dataset_utils import create_dataset_splits
 
 
 class LigandEmbeddingDataset(torch.utils.data.Dataset):
@@ -246,13 +245,13 @@ def main():
 
         # Find PDB ID and ligand columns
         pdb_id_column = None
-        for col in ['pdb_id', 'PDB_ID', 'pdbid', 'PDBID', 'PDB']:
+        for col in ['id','pdb_id', 'PDB_ID', 'pdbid', 'PDBID', 'PDB']:
             if col in hariboss_df.columns:
                 pdb_id_column = col
                 break
 
         ligand_column = None
-        for col in ['ligand', 'Ligand', 'ligand_resname', 'LIGAND', 'ligand_name']:
+        for col in ['sm_ligand_ids','ligand', 'Ligand', 'ligand_resname', 'LIGAND', 'ligand_name']:
             if col in hariboss_df.columns:
                 ligand_column = col
                 break
