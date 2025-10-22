@@ -10,32 +10,35 @@ import urllib.request
 import time
 from tqdm import tqdm
 
+import subprocess
+import os
 
-def download_cif(pdb_id: str, output_dir: Path) -> bool:
-    """
-    Download mmCIF file from RCSB PDB
-
-    Args:
-        pdb_id: PDB ID (e.g., '1aju')
-        output_dir: Directory to save the CIF file
-
-    Returns:
-        True if successful, False otherwise
-    """
+def download_cif(pdb_id: str, output_dir: Path, proxy_url: str = None) -> bool:
     pdb_id = pdb_id.lower()
     url = f"https://files.rcsb.org/download/{pdb_id}.cif"
     output_file = output_dir / f"{pdb_id}.cif"
 
-    # Skip if already exists
     if output_file.exists():
         return True
 
     try:
-        # Download with timeout
-        urllib.request.urlretrieve(url, output_file)
-        return True
+        # 构建 curl 命令
+        cmd = ["curl", "-o", str(output_file), "--max-time", "10", url]
+        
+        # 如果有代理
+        if proxy_url:
+            cmd.extend(["-x", proxy_url])
+        
+        # 执行 curl
+        result = subprocess.run(cmd, capture_output=True, timeout=99999)
+        
+        if result.returncode == 0:
+            return True
+        else:
+            print(f"  ✗ 下载失败 {pdb_id}: {result.stderr.decode()}")
+            return False
     except Exception as e:
-        print(f"  ✗ Failed to download {pdb_id}: {e}")
+        print(f"  ✗ 下载失败 {pdb_id}: {e}")
         return False
 
 
