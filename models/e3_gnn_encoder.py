@@ -49,7 +49,8 @@ class E3GNNMessagePassingLayer(MessagePassing):
         self.irreps_sh = o3.Irreps(irreps_sh)
 
         # Tensor product for combining node features with spherical harmonics
-        self.tp = o3.TensorProduct(
+        # Use FullyConnectedTensorProduct for compatibility with newer e3nn versions
+        self.tp = o3.FullyConnectedTensorProduct(
             self.irreps_in,
             self.irreps_sh,
             self.irreps_out,
