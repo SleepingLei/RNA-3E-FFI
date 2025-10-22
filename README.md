@@ -55,8 +55,13 @@ RNA-3E-FFI/
 ### 1. Install Dependencies
 
 ```bash
-mamba install pytorch torchvision torchaudio torch-geometric pytorch-cuda=12.1 -c pytorch-nightly -c nvidia
+mamba create -n RNA pyhon=3.11
+mamba activate RNA
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+pip install torch-geometric
+pip install torch-scatter torch-sparse torch-cluster torch-spline-conv -f https://data.pyg.org/whl/torch-2.5.0+cu121.html
 pip install -r requirements.txt
+
 ```
 
 ### 2. Install AmberTools
