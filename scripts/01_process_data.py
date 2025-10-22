@@ -13,6 +13,8 @@ import MDAnalysis as mda
 from Bio.PDB import MMCIFParser, PDBIO
 from tqdm import tqdm
 import json
+from multiprocessing import Pool, cpu_count
+from functools import partial
 
 # Residue type definitions
 RNA_RESIDUES = ['A', 'C', 'G', 'U', 'A3', 'A5', 'C3', 'C5', 'G3', 'G5', 'U3', 'U5',
@@ -1011,6 +1013,58 @@ def process_complex_v2(pdb_id: str, ligand_name: str, hariboss_dir: Path,
     return all_results
 
 
+def process_single_complex_wrapper(args_tuple):
+    """
+    Wrapper function for multiprocessing
+    Takes a tuple of arguments and unpacks them for process_complex_v2
+    """
+    (idx, row, hariboss_dir, output_dir, pocket_cutoff,
+     parameterize_rna, parameterize_ligand,
+     parameterize_modified_rna, parameterize_protein) = args_tuple
+
+    try:
+        pdb_id = row['id'].lower()
+
+        # Parse ligands
+        import ast
+        ligands_str = row['sm_ligand_ids']
+        try:
+            ligands = ast.literal_eval(ligands_str)
+            if not isinstance(ligands, list):
+                ligands = [ligands_str]
+        except:
+            ligands = [ligands_str]
+
+        # Process first ligand
+        if ligands and len(ligands) > 0:
+            # Format: "ARG_.:B/1:N" -> extract "ARG"
+            ligand_info = ligands[0].split('_')[0].split(':')[0]
+
+            model_results = process_complex_v2(
+                pdb_id, ligand_info,
+                hariboss_dir, output_dir,
+                pocket_cutoff,
+                parameterize_rna=parameterize_rna,
+                parameterize_ligand=parameterize_ligand,
+                parameterize_modified_rna=parameterize_modified_rna,
+                parameterize_protein=parameterize_protein
+            )
+
+            return (pdb_id, ligand_info, model_results)
+        else:
+            return (pdb_id, None, [])
+
+    except Exception as e:
+        import traceback
+        error_result = {
+            'pdb_id': row['id'].lower() if 'id' in row.index else 'unknown',
+            'ligand': 'unknown',
+            'success': False,
+            'errors': [f"Wrapper exception: {str(e)}", traceback.format_exc()]
+        }
+        return (row['id'].lower() if 'id' in row.index else 'unknown', None, [error_result])
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Process RNA-ligand complexes with separated parameterization (V2)"
@@ -1025,6 +1079,8 @@ def main():
                        help="Cutoff distance (Å) for pocket definition")
     parser.add_argument("--max_complexes", type=int, default=None,
                        help="Maximum number of complexes to process (for testing)")
+    parser.add_argument("--num_workers", type=int, default=None,
+                       help="Number of parallel workers (default: CPU count)")
 
     # Parameterization control flags
     parser.add_argument("--parameterize_rna", action="store_true", default=True,
@@ -1065,42 +1121,34 @@ def main():
     print(f"  Protein:       {'✓ Enabled' if args.parameterize_protein else '✗ Disabled'}")
     print(f"{'='*70}\n")
 
-    # Process each complex
+    # Process each complex with multiprocessing
     results = []
     failed = []
 
+    # Determine number of workers
+    num_workers = args.num_workers if args.num_workers else cpu_count()
     print(f"\n{'='*70}")
-    print(f"Processing {len(df)} complexes")
+    print(f"Processing {len(df)} complexes with {num_workers} workers")
     print(f"{'='*70}\n")
 
-    for idx, row in tqdm(df.iterrows(), total=len(df), desc="Processing complexes"):
-        pdb_id = row['id'].lower()
+    # Prepare arguments for each complex
+    process_args = []
+    for idx, row in df.iterrows():
+        args_tuple = (
+            idx, row, hariboss_dir, output_dir, args.pocket_cutoff,
+            args.parameterize_rna, args.parameterize_ligand,
+            args.parameterize_modified_rna, args.parameterize_protein
+        )
+        process_args.append(args_tuple)
 
-        # Parse ligands
-        import ast
-        ligands_str = row['sm_ligand_ids']
-        try:
-            ligands = ast.literal_eval(ligands_str)
-            if not isinstance(ligands, list):
-                ligands = [ligands_str]
-        except:
-            ligands = [ligands_str]
-
-        # Process first ligand
-        if ligands and len(ligands) > 0:
-            # Format: "ARG_.:B/1:N" -> extract "ARG"
-            ligand_info = ligands[0].split('_')[0].split(':')[0]
-
-            model_results = process_complex_v2(
-                pdb_id, ligand_info,
-                hariboss_dir, output_dir,
-                args.pocket_cutoff,
-                parameterize_rna=args.parameterize_rna,
-                parameterize_ligand=args.parameterize_ligand,
-                parameterize_modified_rna=args.parameterize_modified_rna,
-                parameterize_protein=args.parameterize_protein
-            )
-
+    # Process in parallel with progress bar
+    with Pool(processes=num_workers) as pool:
+        # Use imap for progress tracking
+        for pdb_id, ligand_info, model_results in tqdm(
+            pool.imap(process_single_complex_wrapper, process_args),
+            total=len(df),
+            desc="Processing complexes"
+        ):
             # model_results is now a list of results (one per model)
             results.extend(model_results)
 
