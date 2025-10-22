@@ -350,14 +350,28 @@ quit
         return False, None, None
 
 
-def parameterize_ligand_simple(ligand_atoms: mda.AtomGroup, ligand_name: str,
-                               output_prefix: Path) -> Tuple[bool, Optional[Path], Optional[Path]]:
+def parameterize_ligand_gaff(ligand_atoms: mda.AtomGroup, ligand_name: str,
+                             output_prefix: Path, charge_method: str = "bcc") -> Tuple[bool, Optional[Path], Optional[Path]]:
     """
-    Simple ligand parameterization - save for future antechamber implementation
-    For now, just save the ligand PDB for reference
+    Parameterize ligand using antechamber and GAFF force field
+
+    Workflow:
+    1. Save ligand to PDB
+    2. Run antechamber to assign atom types and charges
+    3. Run parmchk2 to generate missing parameters
+    4. Use tleap to create prmtop/inpcrd with GAFF
+
+    Args:
+        ligand_atoms: MDAnalysis AtomGroup for the ligand
+        ligand_name: Residue name of the ligand
+        output_prefix: Path prefix for output files
+        charge_method: Charge calculation method (bcc, gas, etc.)
+
+    Returns:
+        (success, prmtop_path, inpcrd_path)
     """
     print(f"\n{'─'*70}")
-    print(f"Saving ligand: {len(ligand_atoms)} atoms")
+    print(f"Parameterizing ligand with GAFF: {len(ligand_atoms)} atoms")
     print(f"{'─'*70}")
 
     output_prefix.parent.mkdir(parents=True, exist_ok=True)
@@ -366,10 +380,270 @@ def parameterize_ligand_simple(ligand_atoms: mda.AtomGroup, ligand_name: str,
     ligand_pdb = output_prefix.parent / f"{output_prefix.stem}_ligand_{ligand_name}.pdb"
     ligand_atoms.write(str(ligand_pdb))
     print(f"  Saved ligand to {ligand_pdb.name}")
-    print(f"  ⚠️  Ligand parameterization not implemented yet")
-    print(f"  TODO: Implement antechamber + GAFF workflow")
 
-    return False, None, None
+    # File paths
+    mol2_file = output_prefix.parent / f"{output_prefix.stem}_ligand_{ligand_name}.mol2"
+    frcmod_file = output_prefix.parent / f"{output_prefix.stem}_ligand_{ligand_name}.frcmod"
+    prmtop_file = output_prefix.parent / f"{output_prefix.stem}_ligand.prmtop"
+    inpcrd_file = output_prefix.parent / f"{output_prefix.stem}_ligand.inpcrd"
+
+    try:
+        # Step 1: Run antechamber to assign atom types and calculate charges
+        print(f"  Running antechamber (charge method: {charge_method})...")
+        antechamber_cmd = [
+            "antechamber",
+            "-i", str(ligand_pdb),
+            "-fi", "pdb",
+            "-o", str(mol2_file),
+            "-fo", "mol2",
+            "-c", charge_method,  # AM1-BCC charges
+            "-at", "gaff2",       # GAFF2 atom types
+            "-rn", ligand_name,
+            "-nc", "0",           # Net charge (0 for neutral, adjust if needed)
+            "-pf", "y"            # Remove intermediate files
+        ]
+
+        result = subprocess.run(
+            antechamber_cmd,
+            capture_output=True,
+            text=True,
+            timeout=600,
+            cwd=str(output_prefix.parent)
+        )
+
+        if result.returncode != 0 or not mol2_file.exists():
+            print(f"  ✗ Antechamber failed")
+            if result.stderr:
+                print(f"    Error: {result.stderr[:500]}")
+            return False, None, None
+
+        print(f"  ✓ Generated {mol2_file.name}")
+
+        # Step 2: Run parmchk2 to generate missing force field parameters
+        print(f"  Running parmchk2...")
+        parmchk_cmd = [
+            "parmchk2",
+            "-i", str(mol2_file),
+            "-f", "mol2",
+            "-o", str(frcmod_file),
+            "-s", "gaff2"
+        ]
+
+        result = subprocess.run(
+            parmchk_cmd,
+            capture_output=True,
+            text=True,
+            timeout=300,
+            cwd=str(output_prefix.parent)
+        )
+
+        if result.returncode != 0 or not frcmod_file.exists():
+            print(f"  ✗ Parmchk2 failed")
+            return False, None, None
+
+        print(f"  ✓ Generated {frcmod_file.name}")
+
+        # Step 3: Use tleap to create final topology
+        print(f"  Running tleap with GAFF...")
+        tleap_script = output_prefix.parent / f"{output_prefix.stem}_ligand_tleap.in"
+
+        script_content = f"""source leaprc.gaff2
+loadamberparams {frcmod_file.name}
+mol = loadmol2 {mol2_file.name}
+set default nocenter on
+set default PBRadii mbondi3
+check mol
+saveamberparm mol {prmtop_file.name} {inpcrd_file.name}
+quit
+"""
+
+        tleap_script.write_text(script_content)
+
+        result = subprocess.run(
+            ["tleap", "-f", tleap_script.name],
+            capture_output=True,
+            text=True,
+            cwd=str(output_prefix.parent),
+            timeout=300
+        )
+
+        if prmtop_file.exists() and inpcrd_file.exists():
+            print(f"  ✓ Successfully created {prmtop_file.name} and {inpcrd_file.name}")
+            # Cleanup intermediate files
+            tleap_script.unlink()
+            return True, prmtop_file, inpcrd_file
+        else:
+            print(f"  ✗ tleap failed")
+            if result.stdout:
+                print(f"    Output: {result.stdout[-500:]}")
+            return False, None, None
+
+    except subprocess.TimeoutExpired:
+        print(f"  ✗ Timeout during ligand parameterization")
+        return False, None, None
+    except Exception as e:
+        print(f"  ✗ Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return False, None, None
+
+
+def parameterize_modified_rna(modified_rna_atoms: mda.AtomGroup, output_prefix: Path) -> Tuple[bool, Optional[Path], Optional[Path]]:
+    """
+    Parameterize modified RNA residues using antechamber + GAFF
+
+    Modified RNA residues (PSU, 5MU, 7MG, etc.) don't have standard Amber parameters.
+    We treat each modified residue as a small molecule and parameterize with GAFF,
+    then combine them.
+
+    Returns: (success, prmtop_path, inpcrd_path)
+    """
+    print(f"\n{'─'*70}")
+    print(f"Parameterizing modified RNA: {len(modified_rna_atoms)} atoms, {len(modified_rna_atoms.residues)} residues")
+    print(f"{'─'*70}")
+
+    output_prefix.parent.mkdir(parents=True, exist_ok=True)
+
+    # Save modified RNA to PDB
+    mod_rna_pdb = output_prefix.parent / f"{output_prefix.stem}_modified_rna.pdb"
+    modified_rna_atoms.write(str(mod_rna_pdb))
+    print(f"  Saved modified RNA to {mod_rna_pdb.name}")
+
+    # List of residue names
+    residue_names = list(set(res.resname for res in modified_rna_atoms.residues))
+    print(f"  Modified residues found: {', '.join(residue_names)}")
+
+    # For now, we'll parameterize each modified residue individually with GAFF
+    # then use tleap to combine them
+    all_mol2_files = []
+    all_frcmod_files = []
+
+    for residue in modified_rna_atoms.residues:
+        resname = residue.resname.strip()
+        resid = residue.resid
+
+        # Save individual residue
+        residue_pdb = output_prefix.parent / f"{output_prefix.stem}_mod_{resname}_{resid}.pdb"
+        residue.atoms.write(str(residue_pdb))
+
+        # Parameterize with antechamber
+        mol2_file = output_prefix.parent / f"{output_prefix.stem}_mod_{resname}_{resid}.mol2"
+        frcmod_file = output_prefix.parent / f"{output_prefix.stem}_mod_{resname}_{resid}.frcmod"
+
+        try:
+            # Run antechamber
+            print(f"    Processing {resname}:{resid}...")
+            antechamber_cmd = [
+                "antechamber",
+                "-i", str(residue_pdb),
+                "-fi", "pdb",
+                "-o", str(mol2_file),
+                "-fo", "mol2",
+                "-c", "bcc",
+                "-at", "gaff2",
+                "-rn", resname,
+                "-nc", "0",  # Assume neutral; may need adjustment
+                "-pf", "y"
+            ]
+
+            result = subprocess.run(
+                antechamber_cmd,
+                capture_output=True,
+                text=True,
+                timeout=600,
+                cwd=str(output_prefix.parent)
+            )
+
+            if result.returncode != 0 or not mol2_file.exists():
+                print(f"      ✗ Antechamber failed for {resname}:{resid}")
+                continue
+
+            # Run parmchk2
+            parmchk_cmd = [
+                "parmchk2",
+                "-i", str(mol2_file),
+                "-f", "mol2",
+                "-o", str(frcmod_file),
+                "-s", "gaff2"
+            ]
+
+            result = subprocess.run(
+                parmchk_cmd,
+                capture_output=True,
+                text=True,
+                timeout=300,
+                cwd=str(output_prefix.parent)
+            )
+
+            if result.returncode != 0 or not frcmod_file.exists():
+                print(f"      ✗ Parmchk2 failed for {resname}:{resid}")
+                continue
+
+            all_mol2_files.append(mol2_file)
+            all_frcmod_files.append(frcmod_file)
+            print(f"      ✓ Parameterized {resname}:{resid}")
+
+        except Exception as e:
+            print(f"      ✗ Error parameterizing {resname}:{resid}: {e}")
+            continue
+
+    if not all_mol2_files:
+        print(f"  ✗ No modified residues could be parameterized")
+        return False, None, None
+
+    # Create combined topology with tleap
+    print(f"  Creating combined topology for {len(all_mol2_files)} modified residues...")
+    tleap_script = output_prefix.parent / f"{output_prefix.stem}_modified_rna_tleap.in"
+    prmtop_file = output_prefix.parent / f"{output_prefix.stem}_modified_rna.prmtop"
+    inpcrd_file = output_prefix.parent / f"{output_prefix.stem}_modified_rna.inpcrd"
+
+    # Build tleap script
+    script_lines = ["source leaprc.gaff2\n"]
+
+    # Load all frcmod files
+    for frcmod in all_frcmod_files:
+        script_lines.append(f"loadamberparams {frcmod.name}\n")
+
+    # Load all mol2 files and combine
+    for i, mol2 in enumerate(all_mol2_files):
+        script_lines.append(f"mol{i} = loadmol2 {mol2.name}\n")
+
+    # Combine all molecules
+    if len(all_mol2_files) > 1:
+        combine_str = " ".join([f"mol{i}" for i in range(len(all_mol2_files))])
+        script_lines.append(f"combined = combine {{ {combine_str} }}\n")
+        mol_name = "combined"
+    else:
+        mol_name = "mol0"
+
+    script_lines.append(f"set default nocenter on\n")
+    script_lines.append(f"set default PBRadii mbondi3\n")
+    script_lines.append(f"check {mol_name}\n")
+    script_lines.append(f"saveamberparm {mol_name} {prmtop_file.name} {inpcrd_file.name}\n")
+    script_lines.append(f"quit\n")
+
+    tleap_script.write_text("".join(script_lines))
+
+    # Run tleap
+    print(f"  Running tleap...")
+    result = subprocess.run(
+        ["tleap", "-f", tleap_script.name],
+        capture_output=True,
+        text=True,
+        cwd=str(output_prefix.parent),
+        timeout=300
+    )
+
+    if prmtop_file.exists() and inpcrd_file.exists():
+        print(f"  ✓ Successfully created {prmtop_file.name} and {inpcrd_file.name}")
+        # Cleanup
+        tleap_script.unlink()
+        return True, prmtop_file, inpcrd_file
+    else:
+        print(f"  ✗ tleap failed for modified RNA")
+        if result.stdout:
+            print(f"    Output: {result.stdout[-500:]}")
+        return False, None, None
 
 
 def parameterize_protein(protein_atoms: mda.AtomGroup, output_prefix: Path) -> Tuple[bool, Optional[Path], Optional[Path]]:
@@ -508,7 +782,7 @@ def process_complex_v2(pdb_id: str, ligand_name: str, hariboss_dir: Path,
 
         # Ligand
         if 'ligand' in pocket_components and len(pocket_components['ligand']) > 0:
-            success, prmtop, inpcrd = parameterize_ligand_simple(
+            success, prmtop, inpcrd = parameterize_ligand_gaff(
                 pocket_components['ligand'],
                 ligand_name,
                 output_prefix
@@ -516,7 +790,8 @@ def process_complex_v2(pdb_id: str, ligand_name: str, hariboss_dir: Path,
             result['components']['ligand'] = {
                 'success': success,
                 'atoms': len(pocket_components['ligand']),
-                'saved': True
+                'prmtop': str(prmtop) if prmtop else None,
+                'inpcrd': str(inpcrd) if inpcrd else None
             }
 
         # Protein
@@ -529,6 +804,20 @@ def process_complex_v2(pdb_id: str, ligand_name: str, hariboss_dir: Path,
                 'success': success,
                 'atoms': len(pocket_components['protein']),
                 'residues': len(pocket_components['protein'].residues),
+                'prmtop': str(prmtop) if prmtop else None,
+                'inpcrd': str(inpcrd) if inpcrd else None
+            }
+
+        # Modified RNA
+        if 'modified_rna' in pocket_components and len(pocket_components['modified_rna']) > 0:
+            success, prmtop, inpcrd = parameterize_modified_rna(
+                pocket_components['modified_rna'],
+                output_prefix
+            )
+            result['components']['modified_rna'] = {
+                'success': success,
+                'atoms': len(pocket_components['modified_rna']),
+                'residues': len(pocket_components['modified_rna'].residues),
                 'prmtop': str(prmtop) if prmtop else None,
                 'inpcrd': str(inpcrd) if inpcrd else None
             }

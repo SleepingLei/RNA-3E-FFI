@@ -1,14 +1,27 @@
-# RNA-3E-FFI: E(3) Equivariant GNN for RNA-Ligand Binding Site Prediction
+# RNA-3E-FFI: E(3) Equivariant GNN for RNA-Ligand Virtual Screening
 
-E(3)-equivariant Graph Neural Network for RNA-ligand binding site prediction using pocket-based representations with complete residue selection and robust Amber parameterization.
+E(3)-equivariant Graph Neural Network for RNA-ligand virtual screening. Learns pocket embeddings that align with ligand embeddings in a shared latent space for similarity-based ligand screening.
+
+## Overview
+
+**Goal**: Given an RNA binding pocket, find similar ligands from a library by comparing embeddings in a shared latent space.
+
+**Approach**:
+- RNA pocket → E(3) GNN → Pocket embedding
+- Ligand → Uni-Mol → Ligand embedding
+- Train with contrastive learning to align embeddings
+- Virtual screening: Find ligands with similar embeddings to query pocket
 
 ## Features
 
 - ✅ **Complete Residue-based Pocket Selection**: Ensures all residues are complete (100% atoms vs 0% with atom-based)
 - ✅ **Separated Parameterization**: RNA, ligand, and protein components handled independently
+- ✅ **Ligand Parameterization with GAFF**: Automatic antechamber + GAFF2 workflow for small molecules
+- ✅ **Modified RNA Support**: Handles non-standard residues (PSU, 5MU, 7MG, etc.) via GAFF
 - ✅ **Terminal Atom Cleaning**: Automatic handling of RNA fragment terminals for Amber force field
 - ✅ **Robust Processing**: Pre-checks and fallbacks to avoid pdb4amber crashes
-- ✅ **E(3) Equivariance**: Rotation and translation invariant neural network
+- ✅ **E(3) Equivariance**: Rotation and translation invariant pocket encoder
+- ✅ **Embedding Alignment**: Learns shared latent space with ligand embeddings (Uni-Mol)
 
 ## Project Structure
 
@@ -76,21 +89,29 @@ python scripts/01_process_data.py \
 
 **What it does**:
 1. Loads RNA-ligand complex structures from mmCIF files (in `data/raw/mmCIF/`)
-2. Classifies molecules: RNA, ligand, protein, water, ions
+2. Classifies molecules: RNA, modified RNA, ligand, protein, water, ions
 3. Defines binding pocket using **complete residues** within cutoff distance
 4. Cleans RNA terminal atoms (removes 5' phosphate, 3' hydroxyl)
-5. Parameterizes RNA with Amber RNA.OL3 force field
+5. Parameterizes each component with appropriate force field:
+   - Standard RNA → RNA.OL3
+   - Modified RNA → GAFF2 (via antechamber)
+   - Ligands → GAFF2 (via antechamber + AM1-BCC charges)
+   - Proteins → ff14SB
 
-**Key Innovation**: Residue-based (not atom-based) pocket selection:
+**Key Innovations**:
+- ✅ Residue-based (not atom-based) pocket selection
 - ✅ 100% residue completeness (vs 0% with atom-based)
 - ✅ No pdb4amber crashes from O5'/O3' mismatches
+- ✅ Automatic ligand parameterization with GAFF
+- ✅ Handles modified RNA residues (PSU, 5MU, 7MG, etc.)
 - ✅ Biologically meaningful structural units
 
 **Output**:
 - `data/processed/pockets/*.pdb` - Pocket structures (RNA + ligand)
-- `data/processed/amber/*_rna.prmtop` - RNA topology files
-- `data/processed/amber/*_rna.inpcrd` - RNA coordinate files
-- `data/processed/amber/*_ligand_*.pdb` - Ligand structures
+- `data/processed/amber/*_rna.prmtop/.inpcrd` - Standard RNA topology/coords
+- `data/processed/amber/*_modified_rna.prmtop/.inpcrd` - Modified RNA topology/coords
+- `data/processed/amber/*_ligand.prmtop/.inpcrd` - Ligand topology/coords
+- `data/processed/amber/*_protein.prmtop/.inpcrd` - Protein topology/coords (if present)
 - `data/processed/processing_results.json` - Detailed processing summary
 
 ### Step 2: Generate Ligand Embeddings
@@ -229,14 +250,66 @@ The model implements an E(3) equivariant Graph Neural Network:
       "inpcrd": "data/processed/amber/1aju_ARG_rna.inpcrd"
     },
     "ligand": {
-      "success": false,
+      "success": true,
       "atoms": 26,
-      "saved": true
+      "prmtop": "data/processed/amber/1aju_ARG_ligand.prmtop",
+      "inpcrd": "data/processed/amber/1aju_ARG_ligand.inpcrd"
+    },
+    "modified_rna": {
+      "success": true,
+      "atoms": 78,
+      "residues": 2,
+      "prmtop": "data/processed/amber/1aju_ARG_modified_rna.prmtop",
+      "inpcrd": "data/processed/amber/1aju_ARG_modified_rna.inpcrd"
     }
   },
   "errors": []
 }
 ```
+
+## New Features (Latest Update)
+
+### 1. Ligand Parameterization with GAFF
+
+The pipeline now automatically parameterizes small molecule ligands using the GAFF (General Amber Force Field) workflow:
+
+```
+Ligand PDB → antechamber → parmchk2 → tleap → prmtop/inpcrd
+```
+
+**Features**:
+- Automatic atom type assignment (GAFF2)
+- AM1-BCC charge calculation
+- Generation of missing force field parameters
+- Compatible with AMBER topology format
+
+**Usage**: Automatic when processing complexes with ligands
+
+**Testing**:
+```bash
+python scripts/test_new_features.py
+python scripts/demo_new_features.py --summary
+```
+
+### 2. Modified RNA Residue Support
+
+Now supports non-standard RNA nucleotides commonly found in biological structures:
+
+**Supported modifications**:
+- PSU (Pseudouridine)
+- 5MU (5-Methyluridine)
+- 5MC (5-Methylcytidine)
+- 7MG (7-Methylguanosine)
+- And 12+ more modifications
+
+**Approach**:
+- Each modified residue parameterized as a small molecule using GAFF
+- Multiple modifications combined into single topology
+- Automatic charge calculation
+
+**Implementation**: See `scripts/01_process_data.py:491-646`
+
+For detailed documentation, see [`docs/NEW_FEATURES.md`](docs/NEW_FEATURES.md)
 
 ## Troubleshooting
 

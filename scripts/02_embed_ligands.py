@@ -118,7 +118,7 @@ def generate_ligand_embeddings(sdf_paths, complex_ids, output_h5_path, batch_siz
     try:
         # Initialize Uni-Mol representation model
         print("Initializing Uni-Mol model...")
-        clf = UniMolRepr(data_type='molecule', remove_hs=False)
+        clf = UniMolRepr(data_type='molecule', remove_hs=False,model_name='unimolv2', model_size='1.1B',compute_atomic_reprs=False)
 
         # Process all ligands
         embeddings_dict = {}
