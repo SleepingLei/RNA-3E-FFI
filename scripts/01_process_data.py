@@ -745,19 +745,21 @@ quit
         return False, None, None
 
 
-def process_complex_v2(pdb_id: str, ligand_name: str, hariboss_dir: Path,
-                      output_dir: Path, pocket_cutoff: float,
-                      parameterize_rna: bool = True,
-                      parameterize_ligand: bool = False,
-                      parameterize_modified_rna: bool = False,
-                      parameterize_protein: bool = False) -> Dict:
+def process_single_model(pdb_id: str, ligand_name: str, model_id: int,
+                        universe: mda.Universe, output_dir: Path,
+                        pocket_cutoff: float,
+                        parameterize_rna: bool = True,
+                        parameterize_ligand: bool = False,
+                        parameterize_modified_rna: bool = False,
+                        parameterize_protein: bool = False) -> Dict:
     """
-    Process a single complex with new strategy
+    Process a single model from a structure
 
     Args:
         pdb_id: PDB ID of the complex
         ligand_name: Ligand residue name
-        hariboss_dir: Directory containing HARIBOSS data
+        model_id: Model number (0-indexed)
+        universe: MDAnalysis Universe object at the specific frame
         output_dir: Output directory
         pocket_cutoff: Cutoff distance for pocket definition
         parameterize_rna: Whether to parameterize RNA (default: True)
@@ -766,46 +768,24 @@ def process_complex_v2(pdb_id: str, ligand_name: str, hariboss_dir: Path,
         parameterize_protein: Whether to parameterize protein (default: False)
 
     Returns:
-        Dict with processing results
+        Dict with processing results for this model
     """
-    print(f"\n{'='*70}")
-    print(f"Processing: {pdb_id} - {ligand_name}")
-    print(f"{'='*70}")
+    print(f"\n{'─'*70}")
+    print(f"Processing Model {model_id}: {pdb_id} - {ligand_name}")
+    print(f"{'─'*70}")
 
     result = {
         'pdb_id': pdb_id,
         'ligand': ligand_name,
+        'model_id': model_id,
         'success': False,
         'components': {},
         'errors': []
     }
 
-    # Load structure - look in data/raw/mmCIF first, then hariboss_dir
-    cif_file = Path("data/raw/mmCIF") / f"{pdb_id}.cif"
-    if not cif_file.exists():
-        cif_file = hariboss_dir / "mmCIF" / f"{pdb_id}.cif"
-
-    if not cif_file.exists():
-        result['errors'].append(f"CIF file not found in data/raw/mmCIF or {hariboss_dir}/mmCIF")
-        return result
-
     try:
-        # Convert CIF to PDB (temp file)
-        parser = MMCIFParser(QUIET=True)
-        structure = parser.get_structure(pdb_id, str(cif_file))
-
-        temp_pdb = output_dir / "temp" / f"{pdb_id}_temp.pdb"
-        temp_pdb.parent.mkdir(parents=True, exist_ok=True)
-
-        io = PDBIO()
-        io.set_structure(structure)
-        io.save(str(temp_pdb))
-
-        # Load with MDAnalysis
-        u = mda.Universe(str(temp_pdb))
-
         # Define pocket with separated components
-        pocket_components = define_pocket_by_residues(u, ligand_name, pocket_cutoff)
+        pocket_components = define_pocket_by_residues(universe, ligand_name, pocket_cutoff)
 
         if not pocket_components:
             result['errors'].append("No pocket components found")
@@ -820,13 +800,13 @@ def process_complex_v2(pdb_id: str, ligand_name: str, hariboss_dir: Path,
                 all_pocket_atoms = all_pocket_atoms + comp_atoms
 
         if all_pocket_atoms and len(all_pocket_atoms) > 0:
-            pocket_pdb = output_dir / "pockets" / f"{pdb_id}_{ligand_name}_pocket.pdb"
+            pocket_pdb = output_dir / "pockets" / f"{pdb_id}_{ligand_name}_model{model_id}_pocket.pdb"
             pocket_pdb.parent.mkdir(parents=True, exist_ok=True)
             all_pocket_atoms.write(str(pocket_pdb))
             print(f"\n✓ Saved combined pocket: {len(all_pocket_atoms)} atoms")
 
         # Parameterize each component separately
-        output_prefix = output_dir / "amber" / f"{pdb_id}_{ligand_name}"
+        output_prefix = output_dir / "amber" / f"{pdb_id}_{ligand_name}_model{model_id}"
         output_prefix.parent.mkdir(parents=True, exist_ok=True)
 
         # RNA
@@ -928,15 +908,107 @@ def process_complex_v2(pdb_id: str, ligand_name: str, hariboss_dir: Path,
         if 'rna' in result['components'] and result['components']['rna']['success']:
             result['success'] = True
 
-        # Cleanup temp file
-        temp_pdb.unlink()
-
     except Exception as e:
         result['errors'].append(f"Exception: {str(e)}")
         import traceback
         traceback.print_exc()
 
     return result
+
+
+def process_complex_v2(pdb_id: str, ligand_name: str, hariboss_dir: Path,
+                      output_dir: Path, pocket_cutoff: float,
+                      parameterize_rna: bool = True,
+                      parameterize_ligand: bool = False,
+                      parameterize_modified_rna: bool = False,
+                      parameterize_protein: bool = False) -> List[Dict]:
+    """
+    Process all models in a complex with new strategy
+
+    Args:
+        pdb_id: PDB ID of the complex
+        ligand_name: Ligand residue name
+        hariboss_dir: Directory containing HARIBOSS data
+        output_dir: Output directory
+        pocket_cutoff: Cutoff distance for pocket definition
+        parameterize_rna: Whether to parameterize RNA (default: True)
+        parameterize_ligand: Whether to parameterize ligand (default: False)
+        parameterize_modified_rna: Whether to parameterize modified RNA (default: False)
+        parameterize_protein: Whether to parameterize protein (default: False)
+
+    Returns:
+        List of dicts with processing results for each model
+    """
+    print(f"\n{'='*70}")
+    print(f"Processing Complex: {pdb_id} - {ligand_name}")
+    print(f"{'='*70}")
+
+    all_results = []
+
+    # Load structure - look in data/raw/mmCIF first, then hariboss_dir
+    cif_file = Path("data/raw/mmCIF") / f"{pdb_id}.cif"
+    if not cif_file.exists():
+        cif_file = hariboss_dir / "mmCIF" / f"{pdb_id}.cif"
+
+    if not cif_file.exists():
+        error_result = {
+            'pdb_id': pdb_id,
+            'ligand': ligand_name,
+            'success': False,
+            'errors': [f"CIF file not found in data/raw/mmCIF or {hariboss_dir}/mmCIF"]
+        }
+        return [error_result]
+
+    try:
+        # Convert CIF to PDB (temp file) - this will contain all models
+        parser = MMCIFParser(QUIET=True)
+        structure = parser.get_structure(pdb_id, str(cif_file))
+
+        temp_pdb = output_dir / "temp" / f"{pdb_id}_temp.pdb"
+        temp_pdb.parent.mkdir(parents=True, exist_ok=True)
+
+        io = PDBIO()
+        io.set_structure(structure)
+        io.save(str(temp_pdb))
+
+        # Load with MDAnalysis - all models will be in trajectory
+        u = mda.Universe(str(temp_pdb))
+
+        num_models = len(u.trajectory)
+        print(f"\n📊 Found {num_models} model(s) in {pdb_id}")
+
+        # Process each model
+        for model_idx in range(num_models):
+            # Set trajectory to this frame/model
+            u.trajectory[model_idx]
+
+            # Process this model
+            model_result = process_single_model(
+                pdb_id, ligand_name, model_idx, u, output_dir,
+                pocket_cutoff,
+                parameterize_rna=parameterize_rna,
+                parameterize_ligand=parameterize_ligand,
+                parameterize_modified_rna=parameterize_modified_rna,
+                parameterize_protein=parameterize_protein
+            )
+
+            all_results.append(model_result)
+
+        # Cleanup temp file
+        temp_pdb.unlink()
+
+    except Exception as e:
+        error_result = {
+            'pdb_id': pdb_id,
+            'ligand': ligand_name,
+            'success': False,
+            'errors': [f"Exception during complex processing: {str(e)}"]
+        }
+        import traceback
+        traceback.print_exc()
+        all_results.append(error_result)
+
+    return all_results
 
 
 def main():
@@ -1019,7 +1091,7 @@ def main():
             # Format: "ARG_.:B/1:N" -> extract "ARG"
             ligand_info = ligands[0].split('_')[0].split(':')[0]
 
-            result = process_complex_v2(
+            model_results = process_complex_v2(
                 pdb_id, ligand_info,
                 hariboss_dir, output_dir,
                 args.pocket_cutoff,
@@ -1029,14 +1101,19 @@ def main():
                 parameterize_protein=args.parameterize_protein
             )
 
-            results.append(result)
+            # model_results is now a list of results (one per model)
+            results.extend(model_results)
 
-            if not result['success']:
-                failed.append({
-                    'pdb_id': pdb_id,
-                    'ligand': ligand_info,
-                    'errors': result['errors']
-                })
+            # Check for failures in any model
+            for model_result in model_results:
+                if not model_result['success']:
+                    model_id = model_result.get('model_id', 'unknown')
+                    failed.append({
+                        'pdb_id': pdb_id,
+                        'ligand': ligand_info,
+                        'model_id': model_id,
+                        'errors': model_result.get('errors', [])
+                    })
 
     # Save results
     results_file = output_dir / "processing_results.json"
@@ -1047,14 +1124,20 @@ def main():
     print(f"\n{'='*70}")
     print(f"PROCESSING COMPLETE")
     print(f"{'='*70}")
-    print(f"Total complexes: {len(results)}")
-    print(f"Successful: {sum(1 for r in results if r['success'])}")
-    print(f"Failed: {len(failed)}")
+    print(f"Total models processed: {len(results)}")
+    print(f"Successful models: {sum(1 for r in results if r.get('success', False))}")
+    print(f"Failed models: {len(failed)}")
+
+    # Count unique complexes
+    unique_complexes = len(set(r['pdb_id'] for r in results))
+    print(f"Unique complexes: {unique_complexes}")
 
     if failed:
-        print(f"\nFailed complexes:")
+        print(f"\nFailed models:")
         for f in failed[:10]:  # Show first 10
-            print(f"  {f['pdb_id']} ({f['ligand']}): {', '.join(f['errors'])}")
+            model_info = f"model {f['model_id']}" if 'model_id' in f else ""
+            errors_str = ', '.join(f.get('errors', ['Unknown error']))
+            print(f"  {f['pdb_id']} ({f['ligand']}) {model_info}: {errors_str}")
 
         # Save failed list
         failed_df = pd.DataFrame(failed)
