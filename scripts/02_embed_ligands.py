@@ -2,8 +2,8 @@
 """
 Ligand Embedding Generation using Uni-Mol2
 
-This script extracts ligands from RNA-ligand complexes and generates
-3D-aware embeddings using Uni-Mol.
+This script generates embeddings for ligands using their SMILES representations
+from the compounds database. SMILES are pH-adjusted using OpenBabel at pH 7.4.
 """
 import os
 import sys
@@ -12,128 +12,122 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 import h5py
-import MDAnalysis as mda
-from rdkit import Chem
-from rdkit.Chem import AllChem
+import subprocess
+import tempfile
+import ast
 from tqdm import tqdm
 from unimol_tools import UniMolRepr
 
 
-def extract_ligand_to_sdf(cif_path, ligand_resname, output_sdf_path):
+def process_smiles_with_obabel(smiles, ph=7.4):
     """
-    Extract ligand from mmCIF file and save to SDF format with 3D coordinates.
+    Process SMILES with OpenBabel to adjust protonation state at given pH.
 
     Args:
-        cif_path: Path to input mmCIF file
-        ligand_resname: Residue name of the ligand
-        output_sdf_path: Path to save the ligand SDF file
+        smiles: Input SMILES string
+        ph: Target pH value (default: 7.4)
 
     Returns:
-        True if successful, False otherwise
+        pH-adjusted SMILES string, or None if processing fails
     """
     try:
-        # Load structure with MDAnalysis
-        u = mda.Universe(cif_path)
+        # Create temporary files for input and output
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.smi', delete=False) as f_in:
+            f_in.write(smiles + '\n')
+            temp_in = f_in.name
 
-        # Select ligand atoms
-        try:
-            ligand = u.select_atoms(f"resname {ligand_resname}")
-            if len(ligand) == 0:
-                print(f"Warning: No ligand found with resname {ligand_resname}")
-                return False
-        except Exception as e:
-            print(f"Error selecting ligand: {e}")
-            return False
+        with tempfile.NamedTemporaryFile(mode='r', suffix='.smi', delete=False) as f_out:
+            temp_out = f_out.name
 
-        # Create output directory if needed
-        output_path = Path(output_sdf_path)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
+        # Run obabel with pH adjustment
+        # -p sets the pH for protonation state
+        cmd = ['obabel', temp_in, '-osmi', '-O', temp_out, '-p', str(ph)]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
 
-        # Write ligand to temporary PDB
-        temp_pdb = output_path.parent / f"{output_path.stem}_temp.pdb"
-        ligand.write(str(temp_pdb))
+        if result.returncode != 0:
+            print(f"Warning: obabel failed for SMILES {smiles}: {result.stderr}")
+            # Clean up
+            os.unlink(temp_in)
+            os.unlink(temp_out)
+            return None
 
-        # Convert PDB to RDKit molecule preserving 3D coordinates
-        mol = Chem.MolFromPDBFile(str(temp_pdb), removeHs=False, sanitize=False)
+        # Read the processed SMILES
+        with open(temp_out, 'r') as f:
+            processed_smiles = f.read().strip().split()[0]  # First column is SMILES
 
-        if mol is None:
-            print(f"Warning: RDKit failed to parse ligand from {temp_pdb}")
-            # Try without sanitize=False
-            mol = Chem.MolFromPDBFile(str(temp_pdb), removeHs=False)
+        # Clean up temporary files
+        os.unlink(temp_in)
+        os.unlink(temp_out)
 
-        if mol is None:
-            print(f"Error: Could not convert ligand to RDKit molecule")
-            return False
-
-        # Try to sanitize the molecule
-        try:
-            Chem.SanitizeMol(mol)
-        except Exception as e:
-            print(f"Warning: Sanitization failed: {e}")
-            # Continue anyway - Uni-Mol might still work
-
-        # Get 3D coordinates from conformer
-        if mol.GetNumConformers() == 0:
-            print(f"Warning: No conformer found, using MDAnalysis coordinates")
-            # Create conformer from MDAnalysis coordinates
-            conf = Chem.Conformer(mol.GetNumAtoms())
-            for i, pos in enumerate(ligand.positions):
-                conf.SetAtomPosition(i, tuple(pos))
-            mol.AddConformer(conf)
-
-        # Write to SDF file
-        writer = Chem.SDWriter(str(output_sdf_path))
-        writer.write(mol)
-        writer.close()
-
-        # Clean up temporary file
-        if temp_pdb.exists():
-            temp_pdb.unlink()
-
-        print(f"Saved ligand to {output_sdf_path}")
-        return True
+        return processed_smiles
 
     except Exception as e:
-        print(f"Error extracting ligand from {cif_path}: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
+        print(f"Error processing SMILES with obabel: {e}")
+        return None
 
 
-def generate_ligand_embeddings(sdf_paths, complex_ids, output_h5_path, batch_size=32):
+def extract_ligand_id(ligand_ids_str):
     """
-    Generate embeddings for all ligands using Uni-Mol.
+    Extract ligand ID from the sm_ligand_ids string.
 
     Args:
-        sdf_paths: List of paths to ligand SDF files
-        complex_ids: List of complex IDs corresponding to each SDF
+        ligand_ids_str: String representation of ligand IDs list, e.g., "['ARG_.:B/47:A']"
+
+    Returns:
+        Ligand ID (e.g., 'ARG') or None if extraction fails
+    """
+    try:
+        # Parse the string as a Python list
+        ligand_list = ast.literal_eval(ligand_ids_str)
+        if not ligand_list:
+            return None
+
+        # Take the first ligand ID and extract the compound code
+        # Format is like 'ARG_.:B/47:A', we want 'ARG'
+        full_id = ligand_list[0]
+        ligand_code = full_id.split('_')[0]
+        return ligand_code
+
+    except Exception as e:
+        print(f"Error extracting ligand ID from {ligand_ids_str}: {e}")
+        return None
+
+
+def generate_ligand_embeddings(smiles_list, complex_ids, output_h5_path, batch_size=32):
+    """
+    Generate embeddings for all ligands using Uni-Mol from SMILES.
+
+    Args:
+        smiles_list: List of SMILES strings (pH-adjusted)
+        complex_ids: List of complex IDs corresponding to each SMILES
         output_h5_path: Path to save embeddings HDF5 file
         batch_size: Batch size for processing
 
     Returns:
         Dictionary mapping complex IDs to embedding vectors
     """
-    print(f"\nGenerating embeddings for {len(sdf_paths)} ligands using Uni-Mol...")
+    print(f"\nGenerating embeddings for {len(smiles_list)} ligands using Uni-Mol...")
 
     try:
         # Initialize Uni-Mol representation model
         print("Initializing Uni-Mol model...")
-        clf = UniMolRepr(data_type='molecule', remove_hs=False,model_name='unimolv2', model_size='1.1B',compute_atomic_reprs=False)
+        clf = UniMolRepr(data_type='molecule', remove_hs=False, model_name='unimolv2',
+                        model_size='1.1B', compute_atomic_reprs=False)
 
         # Process all ligands
         embeddings_dict = {}
 
         # Process in batches
-        for i in range(0, len(sdf_paths), batch_size):
-            batch_paths = sdf_paths[i:i+batch_size]
+        for i in range(0, len(smiles_list), batch_size):
+            batch_smiles = smiles_list[i:i+batch_size]
             batch_ids = complex_ids[i:i+batch_size]
 
-            print(f"Processing batch {i//batch_size + 1}/{(len(sdf_paths)-1)//batch_size + 1}...")
+            print(f"Processing batch {i//batch_size + 1}/{(len(smiles_list)-1)//batch_size + 1}...")
 
             try:
-                # Get representations
-                # Uni-Mol expects a list of molecule data
-                reprs = clf.get_repr(batch_paths, return_atomic_reprs=False)
+                # Get representations from SMILES
+                # UniMol can accept SMILES strings directly
+                reprs = clf.get_repr(batch_smiles, return_atomic_reprs=False)
 
                 # Extract CLS representations
                 # reprs is typically a dictionary with 'cls_repr' key
@@ -176,112 +170,115 @@ def generate_ligand_embeddings(sdf_paths, complex_ids, output_h5_path, batch_siz
 
 def main():
     """Main ligand embedding generation pipeline."""
-    parser = argparse.ArgumentParser(description="Generate ligand embeddings using Uni-Mol")
-    parser.add_argument("--hariboss_csv", type=str, default="hariboss/Complexes.csv",
+    parser = argparse.ArgumentParser(description="Generate ligand embeddings using Uni-Mol from SMILES")
+    parser.add_argument("--complexes_csv", type=str, default="hariboss/Complexes.csv",
                         help="Path to HARIBOSS complexes CSV file")
-    parser.add_argument("--mmcif_dir", type=str, default="data/raw/mmCIF",
-                        help="Directory containing mmCIF files")
+    parser.add_argument("--compounds_csv", type=str, default="hariboss/compounds.csv",
+                        help="Path to compounds CSV file with SMILES")
     parser.add_argument("--output_dir", type=str, default="data/processed",
-                        help="Output directory for SDF files and embeddings")
+                        help="Output directory for processed data")
     parser.add_argument("--output_h5", type=str, default="data/processed/ligand_embeddings.h5",
                         help="Output HDF5 file for embeddings")
     parser.add_argument("--batch_size", type=int, default=32,
                         help="Batch size for Uni-Mol processing")
+    parser.add_argument("--ph", type=float, default=7.4,
+                        help="pH value for protonation state adjustment (default: 7.4)")
     parser.add_argument("--max_complexes", type=int, default=None,
                         help="Maximum number of complexes to process (for testing)")
 
     args = parser.parse_args()
 
-    # Setup paths
-    mmcif_dir = Path(args.mmcif_dir)
-    sdf_dir = Path(args.output_dir) / "ligands"
-    sdf_dir.mkdir(parents=True, exist_ok=True)
+    # Create output directory
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Read HARIBOSS list
-    print(f"Reading HARIBOSS CSV from {args.hariboss_csv}...")
-    hariboss_df = pd.read_csv(args.hariboss_csv)
-    print(f"Found {len(hariboss_df)} complexes")
+    # Read HARIBOSS complexes
+    print(f"Reading complexes from {args.complexes_csv}...")
+    complexes_df = pd.read_csv(args.complexes_csv)
+    print(f"Found {len(complexes_df)} complexes")
+
+    # Read compounds database
+    print(f"Reading compounds from {args.compounds_csv}...")
+    compounds_df = pd.read_csv(args.compounds_csv)
+    print(f"Found {len(compounds_df)} compounds")
+
+    # Create a mapping from compound ID to SMILES
+    compound_smiles_map = dict(zip(compounds_df['id'], compounds_df['canonical_smiles']))
 
     # Limit number of complexes if specified
     if args.max_complexes:
-        hariboss_df = hariboss_df.head(args.max_complexes)
-        print(f"Processing first {len(hariboss_df)} complexes")
+        complexes_df = complexes_df.head(args.max_complexes)
+        print(f"Processing first {len(complexes_df)} complexes")
 
-    # Find PDB ID and ligand columns
+    # Find PDB ID column
     pdb_id_column = None
-    for col in ['pdb_id', 'PDB_ID', 'pdbid', 'PDBID', 'PDB']:
-        if col in hariboss_df.columns:
+    for col in ['id', 'pdb_id', 'PDB_ID', 'pdbid', 'PDBID', 'PDB']:
+        if col in complexes_df.columns:
             pdb_id_column = col
             break
 
     if pdb_id_column is None:
-        print("Available columns:", hariboss_df.columns.tolist())
+        print("Available columns:", complexes_df.columns.tolist())
         print("Error: Could not find PDB ID column in CSV")
         sys.exit(1)
 
-    ligand_column = None
-    for col in ['ligand', 'Ligand', 'ligand_resname', 'LIGAND', 'ligand_name']:
-        if col in hariboss_df.columns:
-            ligand_column = col
-            break
-
-    if ligand_column is None:
-        print("Warning: Could not find ligand column, using default 'LIG'")
-        hariboss_df['ligand_resname'] = 'LIG'
-        ligand_column = 'ligand_resname'
-
-    # Extract ligands to SDF files
-    sdf_paths = []
+    # Process ligands and prepare SMILES
+    smiles_list = []
     complex_ids = []
-    failed_extractions = []
+    failed_processing = []
 
-    print("\nExtracting ligands to SDF files...")
-    for idx, row in tqdm(hariboss_df.iterrows(), total=len(hariboss_df)):
+    print("\nProcessing ligands and adjusting pH...")
+    for idx, row in tqdm(complexes_df.iterrows(), total=len(complexes_df)):
         pdb_id = str(row[pdb_id_column]).lower()
-        ligand_resname = str(row[ligand_column])
-        complex_id = f"{pdb_id}_{ligand_resname}"
+        ligand_ids_str = str(row['sm_ligand_ids'])
 
-        # Define file paths
-        cif_path = mmcif_dir / f"{pdb_id}.cif"
-        sdf_path = sdf_dir / f"{complex_id}.sdf"
-
-        # Skip if SDF already exists
-        if sdf_path.exists():
-            sdf_paths.append(str(sdf_path))
-            complex_ids.append(complex_id)
+        # Extract ligand ID
+        ligand_id = extract_ligand_id(ligand_ids_str)
+        if ligand_id is None:
+            failed_processing.append((pdb_id, "failed_to_extract_ligand_id"))
             continue
 
-        # Check if mmCIF file exists
-        if not cif_path.exists():
-            print(f"Warning: mmCIF file not found for {pdb_id}")
-            failed_extractions.append((complex_id, "mmcif_not_found"))
+        complex_id = f"{pdb_id}_{ligand_id}"
+
+        # Get SMILES from compounds database
+        if ligand_id not in compound_smiles_map:
+            failed_processing.append((complex_id, f"ligand_not_found_in_compounds_db"))
             continue
 
-        # Extract ligand
-        try:
-            success = extract_ligand_to_sdf(cif_path, ligand_resname, sdf_path)
-            if success:
-                sdf_paths.append(str(sdf_path))
-                complex_ids.append(complex_id)
-            else:
-                failed_extractions.append((complex_id, "extraction_failed"))
-        except Exception as e:
-            print(f"Error extracting {complex_id}: {e}")
-            failed_extractions.append((complex_id, str(e)))
+        original_smiles = compound_smiles_map[ligand_id]
 
-    print(f"\nSuccessfully extracted {len(sdf_paths)} ligands")
-    print(f"Failed extractions: {len(failed_extractions)}")
+        # Process SMILES with obabel to adjust pH
+        processed_smiles = process_smiles_with_obabel(original_smiles, ph=args.ph)
+        if processed_smiles is None:
+            # If obabel fails, use original SMILES
+            print(f"Warning: Using original SMILES for {complex_id}")
+            processed_smiles = original_smiles
 
-    if failed_extractions:
-        failed_df = pd.DataFrame(failed_extractions, columns=['complex_id', 'reason'])
-        failed_path = Path(args.output_dir) / "failed_ligand_extractions.csv"
+        smiles_list.append(processed_smiles)
+        complex_ids.append(complex_id)
+
+    print(f"\nSuccessfully processed {len(smiles_list)} ligands")
+    print(f"Failed processing: {len(failed_processing)}")
+
+    if failed_processing:
+        failed_df = pd.DataFrame(failed_processing, columns=['complex_id', 'reason'])
+        failed_path = output_dir / "failed_ligand_processing.csv"
         failed_df.to_csv(failed_path, index=False)
-        print(f"Failed extractions saved to {failed_path}")
+        print(f"Failed processing saved to {failed_path}")
 
-    # Generate embeddings
-    if len(sdf_paths) > 0:
+    # Save processed SMILES for reference
+    if len(smiles_list) > 0:
+        smiles_df = pd.DataFrame({
+            'complex_id': complex_ids,
+            'smiles': smiles_list
+        })
+        smiles_path = output_dir / "processed_ligand_smiles.csv"
+        smiles_df.to_csv(smiles_path, index=False)
+        print(f"Processed SMILES saved to {smiles_path}")
+
+        # Generate embeddings
         embeddings = generate_ligand_embeddings(
-            sdf_paths,
+            smiles_list,
             complex_ids,
             args.output_h5,
             batch_size=args.batch_size
