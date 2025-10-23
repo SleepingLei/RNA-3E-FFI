@@ -134,6 +134,10 @@ def train_epoch(model, loader, optimizer, device):
         total_loss += loss.item()
         num_batches += 1
 
+        # Clear cache to prevent OOM
+        if device.type == 'cuda':
+            torch.cuda.empty_cache()
+
     return total_loss / num_batches
 
 
@@ -176,6 +180,10 @@ def evaluate(model, loader, device):
             total_l1_loss += l1_loss.item()
             num_batches += 1
 
+            # Clear cache to prevent OOM
+            if device.type == 'cuda':
+                torch.cuda.empty_cache()
+
     return {
         'mse_loss': total_loss / num_batches,
         'l1_loss': total_l1_loss / num_batches
@@ -209,7 +217,7 @@ def main():
                         help="Number of radial basis functions")
 
     # Training arguments
-    parser.add_argument("--batch_size", type=int, default=1,
+    parser.add_argument("--batch_size", type=int, default=2,
                         help="Batch size")
     parser.add_argument("--num_epochs", type=int, default=10,
                         help="Number of training epochs")
