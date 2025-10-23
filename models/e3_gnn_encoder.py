@@ -248,7 +248,7 @@ class RNAPocketEncoder(nn.Module):
         x, pos, edge_index = data.x, data.pos, data.edge_index
 
         # Get batch information
-        if hasattr(data, 'batch'):
+        if hasattr(data, 'batch') and data.batch is not None:
             batch = data.batch
         else:
             batch = torch.zeros(x.size(0), dtype=torch.long, device=x.device)
