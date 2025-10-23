@@ -269,15 +269,17 @@ class RNAPocketEncoder(nn.Module):
         attention_logits = self.pooling_mlp(h_scalar)  # [num_nodes, 1]
 
         # Apply softmax per graph in batch
-        attention_weights = softmax(attention_logits, batch, dim=0)  # [num_nodes, 1]
+        # Use index parameter for PyG softmax
+        attention_weights = softmax(attention_logits, index=batch, dim=0)  # [num_nodes, 1]
 
         # Weighted sum of node features
         weighted_features = h_scalar * attention_weights  # [num_nodes, scalar_dim]
 
         # Sum over nodes in each graph
+        # Use index parameter for PyG scatter
         graph_embedding = scatter(
             weighted_features,
-            batch,
+            index=batch,
             dim=0,
             reduce='sum'
         )  # [batch_size, scalar_dim]
