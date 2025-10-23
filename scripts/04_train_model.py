@@ -217,9 +217,9 @@ def main():
                         help="Number of radial basis functions")
 
     # Training arguments
-    parser.add_argument("--batch_size", type=int, default=2,
+    parser.add_argument("--batch_size", type=int, default=4,
                         help="Batch size")
-    parser.add_argument("--num_epochs", type=int, default=10,
+    parser.add_argument("--num_epochs", type=int, default=150,
                         help="Number of training epochs")
     parser.add_argument("--lr", type=float, default=1e-4,
                         help="Learning rate")
