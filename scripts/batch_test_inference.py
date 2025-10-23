@@ -144,16 +144,10 @@ def extract_ligand_from_sample_name(sample_name):
 def get_graph_path_from_sample(sample_name, graphs_dir):
     """
     Get graph file path from sample name.
-    E.g., '2kx8_ARG_model2' -> 'data/processed/graphs/2kx8_ARG.pt'
+    E.g., '2kx8_ARG_model2' -> 'data/processed/graphs/2kx8_ARG_model2.pt'
     """
-    # Remove model suffix
-    parts = sample_name.split('_')
-    if parts[-1].startswith('model'):
-        base_name = '_'.join(parts[:-1])
-    else:
-        base_name = sample_name
-
-    return Path(graphs_dir) / f"{base_name}.pt"
+    # Keep the full sample name including model suffix
+    return Path(graphs_dir) / f"{sample_name}.pt"
 
 
 def compute_metrics(ranks):
