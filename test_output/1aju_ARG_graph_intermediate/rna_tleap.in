@@ -1,0 +1,10 @@
+source leaprc.RNA.OL3
+mol = loadpdb rna_cleaned.pdb
+
+# For pocket fragments, accept structure as-is
+set default nocenter on
+set default PBRadii mbondi3
+
+# Save topology and coordinates
+saveamberparm mol rna.prmtop rna.inpcrd
+quit

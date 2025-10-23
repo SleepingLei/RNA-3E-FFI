@@ -244,6 +244,12 @@ def main():
     parser.add_argument("--save_every", type=int, default=5,
                         help="Save checkpoint every N epochs")
 
+    # Resume training arguments
+    parser.add_argument("--resume", action="store_true",
+                        help="Resume training from a checkpoint")
+    parser.add_argument("--checkpoint", type=str, default="models/checkpoints/best_model.pt",
+                        help="Path to checkpoint file to resume from")
+
     args = parser.parse_args()
 
     # Set random seed
@@ -421,14 +427,45 @@ def main():
         verbose=True
     )
 
-    # Training loop
+    # Load checkpoint if resuming
+    start_epoch = 1
     best_val_loss = float('inf')
     patience_counter = 0
     train_history = []
     val_history = []
 
+    if args.resume:
+        checkpoint_path = Path(args.checkpoint)
+        if checkpoint_path.exists():
+            print(f"\nLoading checkpoint from {checkpoint_path}")
+            checkpoint = torch.load(checkpoint_path, map_location=device)
+
+            # Load model and optimizer states
+            model.load_state_dict(checkpoint['model_state_dict'])
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+
+            # Resume from next epoch
+            start_epoch = checkpoint['epoch'] + 1
+            best_val_loss = checkpoint.get('val_loss', float('inf'))
+
+            # Load training history if available
+            history_path = output_dir / "training_history.json"
+            if history_path.exists():
+                with open(history_path, 'r') as f:
+                    history = json.load(f)
+                    train_history = history.get('train_loss', [])
+                    val_history = history.get('val_loss', [])
+
+            print(f"Resumed from epoch {checkpoint['epoch']}")
+            print(f"Best validation loss so far: {best_val_loss:.6f}")
+        else:
+            print(f"\nWarning: Checkpoint file {checkpoint_path} not found!")
+            print("Starting training from scratch...\n")
+    else:
+        print("\nStarting training from scratch...\n")
+
     print("\nStarting training...\n")
-    for epoch in range(1, args.num_epochs + 1):
+    for epoch in range(start_epoch, args.num_epochs + 1):
         print(f"Epoch {epoch}/{args.num_epochs}")
         print("-" * 60)
 
