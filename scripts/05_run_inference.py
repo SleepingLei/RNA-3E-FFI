@@ -76,6 +76,10 @@ def predict_pocket_embedding(pocket_graph, model, device):
         # Move graph to device
         pocket_graph = pocket_graph.to(device)
 
+        # Ensure batch attribute exists for single graph inference
+        if not hasattr(pocket_graph, 'batch') or pocket_graph.batch is None:
+            pocket_graph.batch = torch.zeros(pocket_graph.num_nodes, dtype=torch.long, device=device)
+
         # Forward pass
         embedding = model(pocket_graph)
 
