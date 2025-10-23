@@ -41,7 +41,7 @@ def print_h5_structure(h5_file, max_items=10):
             elif len(dataset.shape) <= 2 and dataset.size <= 50:
                 print(f"      Sample:\n{dataset[:]}")
             else:
-                print(f"      Sample (first 5 elements): {dataset.flat[:5]}")
+                print(f"      Sample (first 5 elements): {dataset[:].flat[:5]}")
             print()
 
         if len(keys) > max_items:
