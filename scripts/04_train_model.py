@@ -1,9 +1,16 @@
 #!/usr/bin/env python3
 """
-Training Script for RNA Pocket Encoder
+Training Script for RNA Pocket Encoder v2.0
 
 This script trains the E(3) equivariant GNN to predict ligand embeddings
 from RNA binding pocket structures.
+
+Version 2.0 changes:
+- Uses RNAPocketEncoderV2 with embedding-based input
+- Supports multi-hop message passing (1/2/3-hop)
+- Supports non-bonded interactions
+- Learnable combination weights
+- 4-dimensional input features [atom_type_idx, charge, residue_idx, atomic_num]
 """
 import os
 import sys
@@ -15,31 +22,40 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.optim import Adam
-from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.optim import Adam, AdamW
+from torch.optim.lr_scheduler import ReduceLROnPlateau, CosineAnnealingLR
 from torch_geometric.loader import DataLoader
 from tqdm import tqdm
 import h5py
+import warnings
 
 # Add models directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from models.e3_gnn_encoder import RNAPocketEncoder
+from models.e3_gnn_encoder_v2 import RNAPocketEncoderV2
+from scripts.amber_vocabulary import get_global_encoder
 
 
 class LigandEmbeddingDataset(torch.utils.data.Dataset):
     """
     Dataset that loads pre-computed graphs and ligand embeddings.
+
+    v2.0 changes:
+    - Validates that graphs use 4-dimensional input features
+    - Checks for multi-hop indices (triple_index, quadra_index)
+    - Checks for non-bonded edges
     """
 
-    def __init__(self, complex_ids, graph_dir, ligand_embeddings_path):
+    def __init__(self, complex_ids, graph_dir, ligand_embeddings_path, validate_format=True):
         """
         Args:
             complex_ids: List of complex IDs to include (may have _model{N} suffix)
             graph_dir: Directory containing graph .pt files
             ligand_embeddings_path: Path to HDF5 file with ligand embeddings
+            validate_format: Whether to validate v2.0 data format
         """
         self.complex_ids = complex_ids
         self.graph_dir = Path(graph_dir)
+        self.validate_format = validate_format
 
         # Load all ligand embeddings (keys don't have model numbers)
         self.ligand_embeddings = {}
@@ -65,12 +81,50 @@ class LigandEmbeddingDataset(torch.utils.data.Dataset):
 
         # Filter to only include complexes with both graph and embedding
         self.valid_ids = []
+        format_warnings = []
+
         for complex_id in complex_ids:
             graph_path = self.graph_dir / f"{complex_id}.pt"
             if graph_path.exists() and complex_id in self.id_to_embedding_key:
+                # Validate data format if requested
+                if validate_format:
+                    try:
+                        data = torch.load(graph_path)
+
+                        # Check input feature dimension (should be 4 for v2.0)
+                        if data.x.shape[1] != 4:
+                            format_warnings.append(
+                                f"{complex_id}: Expected 4D features, got {data.x.shape[1]}D"
+                            )
+                            continue
+
+                        # Check for required attributes
+                        if not hasattr(data, 'edge_index'):
+                            format_warnings.append(f"{complex_id}: Missing edge_index")
+                            continue
+
+                        # Optional: warn if multi-hop indices are missing
+                        if not hasattr(data, 'triple_index'):
+                            if len(format_warnings) < 3:  # Limit warnings
+                                format_warnings.append(
+                                    f"{complex_id}: Missing triple_index (2-hop angles)"
+                                )
+
+                    except Exception as e:
+                        format_warnings.append(f"{complex_id}: Error loading - {str(e)}")
+                        continue
+
                 self.valid_ids.append(complex_id)
 
         print(f"Dataset initialized with {len(self.valid_ids)} valid complexes")
+
+        if format_warnings:
+            print(f"\n⚠️  Format validation warnings ({len(format_warnings)} total):")
+            for warning in format_warnings[:5]:  # Show first 5
+                print(f"  - {warning}")
+            if len(format_warnings) > 5:
+                print(f"  ... and {len(format_warnings) - 5} more")
+            print("\n💡 Tip: Regenerate graphs with scripts/03_build_dataset.py for v2.0 format\n")
 
     def __len__(self):
         return len(self.valid_ids)
@@ -104,7 +158,7 @@ def train_epoch(model, loader, optimizer, device):
         device: Device to train on
 
     Returns:
-        Average training loss
+        Dictionary with training metrics including loss and learnable weights
     """
     model.train()
     total_loss = 0
@@ -129,6 +183,10 @@ def train_epoch(model, loader, optimizer, device):
         # Backward pass
         optimizer.zero_grad()
         loss.backward()
+
+        # Optional: Gradient clipping for stability
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+
         optimizer.step()
 
         total_loss += loss.item()
@@ -138,7 +196,17 @@ def train_epoch(model, loader, optimizer, device):
         if device.type == 'cuda':
             torch.cuda.empty_cache()
 
-    return total_loss / num_batches
+    # Get learnable weights if available
+    metrics = {'loss': total_loss / num_batches}
+
+    if hasattr(model, 'angle_weight'):
+        metrics['angle_weight'] = model.angle_weight.item()
+    if hasattr(model, 'dihedral_weight'):
+        metrics['dihedral_weight'] = model.dihedral_weight.item()
+    if hasattr(model, 'nonbonded_weight'):
+        metrics['nonbonded_weight'] = model.nonbonded_weight.item()
+
+    return metrics
 
 
 def evaluate(model, loader, device):
@@ -204,9 +272,11 @@ def main():
     parser.add_argument("--splits_file", type=str, default="data/splits/splits.json",
                         help="Path to save/load dataset splits")
 
-    # Model arguments
-    parser.add_argument("--input_dim", type=int, default=11,
-                        help="Input feature dimension")
+    # Model arguments (v2.0)
+    parser.add_argument("--atom_embed_dim", type=int, default=32,
+                        help="Embedding dimension for atom types")
+    parser.add_argument("--residue_embed_dim", type=int, default=16,
+                        help="Embedding dimension for residues")
     parser.add_argument("--hidden_irreps", type=str, default="32x0e + 16x1o + 8x2e",
                         help="Hidden layer irreps")
     parser.add_argument("--output_dim", type=int, default=1536,
@@ -215,6 +285,21 @@ def main():
                         help="Number of message passing layers")
     parser.add_argument("--num_radial_basis", type=int, default=8,
                         help="Number of radial basis functions")
+
+    # v2.0 specific arguments
+    parser.add_argument("--use_multi_hop", action="store_true", default=True,
+                        help="Enable multi-hop message passing (2-hop angles, 3-hop dihedrals)")
+    parser.add_argument("--use_nonbonded", action="store_true", default=True,
+                        help="Enable non-bonded interactions")
+    parser.add_argument("--use_gate", action="store_true", default=False,
+                        help="Use gate activation (requires improved layers)")
+    parser.add_argument("--use_layer_norm", action="store_true", default=False,
+                        help="Use layer normalization (requires improved layers)")
+    parser.add_argument("--pooling_type", type=str, default="attention",
+                        choices=["attention", "mean", "sum", "max"],
+                        help="Graph pooling type")
+    parser.add_argument("--dropout", type=float, default=0.0,
+                        help="Dropout rate")
 
     # Training arguments
     parser.add_argument("--batch_size", type=int, default=2,
@@ -225,10 +310,18 @@ def main():
                         help="Learning rate")
     parser.add_argument("--weight_decay", type=float, default=1e-5,
                         help="Weight decay")
+    parser.add_argument("--optimizer", type=str, default="adam",
+                        choices=["adam", "adamw"],
+                        help="Optimizer type")
+    parser.add_argument("--scheduler", type=str, default="plateau",
+                        choices=["plateau", "cosine"],
+                        help="Learning rate scheduler")
     parser.add_argument("--patience", type=int, default=10,
                         help="Early stopping patience")
     parser.add_argument("--num_workers", type=int, default=4,
                         help="Number of data loader workers")
+    parser.add_argument("--grad_clip", type=float, default=1.0,
+                        help="Gradient clipping max norm (0 to disable)")
 
     # Splitting arguments
     parser.add_argument("--train_ratio", type=float, default=0.8,
@@ -399,33 +492,73 @@ def main():
         pin_memory=True if device.type == 'cuda' else False
     )
 
-    # Initialize model
-    print("\nInitializing model...")
-    model = RNAPocketEncoder(
-        input_dim=args.input_dim,
+    # Initialize model (v2.0)
+    print("\nInitializing v2.0 model...")
+
+    # Get vocabulary sizes
+    encoder = get_global_encoder()
+    print(f"Vocabulary sizes: {encoder.num_atom_types} atom types, {encoder.num_residues} residues")
+
+    model = RNAPocketEncoderV2(
+        num_atom_types=encoder.num_atom_types,
+        num_residues=encoder.num_residues,
+        atom_embed_dim=args.atom_embed_dim,
+        residue_embed_dim=args.residue_embed_dim,
         hidden_irreps=args.hidden_irreps,
         output_dim=args.output_dim,
         num_layers=args.num_layers,
-        num_radial_basis=args.num_radial_basis
+        num_radial_basis=args.num_radial_basis,
+        use_multi_hop=args.use_multi_hop,
+        use_nonbonded=args.use_nonbonded,
+        use_gate=args.use_gate,
+        use_layer_norm=args.use_layer_norm,
+        pooling_type=args.pooling_type,
+        dropout=args.dropout
     )
 
     model = model.to(device)
-    print(f"Model has {sum(p.numel() for p in model.parameters())} parameters")
+    print(f"Model has {sum(p.numel() for p in model.parameters()):,} parameters")
 
-    # Initialize optimizer and scheduler
-    optimizer = Adam(
-        model.parameters(),
-        lr=args.lr,
-        weight_decay=args.weight_decay
-    )
+    # Print model configuration
+    print("\nModel configuration:")
+    print(f"  Multi-hop: {args.use_multi_hop}")
+    print(f"  Non-bonded: {args.use_nonbonded}")
+    print(f"  Pooling: {args.pooling_type}")
+    if args.use_multi_hop:
+        print(f"  Initial angle weight: {model.angle_weight.item():.3f}")
+        print(f"  Initial dihedral weight: {model.dihedral_weight.item():.3f}")
+    if args.use_nonbonded:
+        print(f"  Initial nonbonded weight: {model.nonbonded_weight.item():.3f}")
 
-    scheduler = ReduceLROnPlateau(
-        optimizer,
-        mode='min',
-        factor=0.5,
-        patience=5,
-        verbose=True
-    )
+    # Initialize optimizer
+    if args.optimizer == "adamw":
+        optimizer = AdamW(
+            model.parameters(),
+            lr=args.lr,
+            weight_decay=args.weight_decay
+        )
+    else:
+        optimizer = Adam(
+            model.parameters(),
+            lr=args.lr,
+            weight_decay=args.weight_decay
+        )
+
+    # Initialize scheduler
+    if args.scheduler == "cosine":
+        scheduler = CosineAnnealingLR(
+            optimizer,
+            T_max=args.num_epochs,
+            eta_min=args.lr * 0.01
+        )
+    else:
+        scheduler = ReduceLROnPlateau(
+            optimizer,
+            mode='min',
+            factor=0.5,
+            patience=5,
+            verbose=True
+        )
 
     # Load checkpoint if resuming
     start_epoch = 1
@@ -464,14 +597,33 @@ def main():
     else:
         print("\nStarting training from scratch...\n")
 
+    # Additional tracking for v2.0
+    weight_history = {
+        'angle_weight': [],
+        'dihedral_weight': [],
+        'nonbonded_weight': []
+    }
+
     print("\nStarting training...\n")
     for epoch in range(start_epoch, args.num_epochs + 1):
         print(f"Epoch {epoch}/{args.num_epochs}")
         print("-" * 60)
 
         # Train
-        train_loss = train_epoch(model, train_loader, optimizer, device)
+        train_metrics = train_epoch(model, train_loader, optimizer, device)
+        train_loss = train_metrics['loss']
         print(f"Train Loss: {train_loss:.6f}")
+
+        # Print learnable weights if available
+        if 'angle_weight' in train_metrics:
+            print(f"  Angle weight: {train_metrics['angle_weight']:.4f}")
+            weight_history['angle_weight'].append(train_metrics['angle_weight'])
+        if 'dihedral_weight' in train_metrics:
+            print(f"  Dihedral weight: {train_metrics['dihedral_weight']:.4f}")
+            weight_history['dihedral_weight'].append(train_metrics['dihedral_weight'])
+        if 'nonbonded_weight' in train_metrics:
+            print(f"  Nonbonded weight: {train_metrics['nonbonded_weight']:.4f}")
+            weight_history['nonbonded_weight'].append(train_metrics['nonbonded_weight'])
 
         # Validate
         val_metrics = evaluate(model, val_loader, device)
@@ -479,7 +631,10 @@ def main():
         print(f"Val Loss: {val_loss:.6f}, Val L1: {val_metrics['l1_loss']:.6f}")
 
         # Update learning rate
-        scheduler.step(val_loss)
+        if args.scheduler == "plateau":
+            scheduler.step(val_loss)
+        else:
+            scheduler.step()
         current_lr = optimizer.param_groups[0]['lr']
         print(f"Learning Rate: {current_lr:.2e}")
 
@@ -526,7 +681,9 @@ def main():
     # Save training history
     history = {
         'train_loss': train_history,
-        'val_loss': val_history
+        'val_loss': val_history,
+        'learnable_weights': weight_history,
+        'config': vars(args)
     }
     with open(output_dir / "training_history.json", 'w') as f:
         json.dump(history, f, indent=2)
@@ -534,6 +691,16 @@ def main():
     print("\nTraining complete!")
     print(f"Best validation loss: {best_val_loss:.6f}")
     print(f"Best model saved to {output_dir / 'best_model.pt'}")
+
+    # Print final learnable weights
+    if args.use_multi_hop or args.use_nonbonded:
+        print("\nFinal learnable weights:")
+        if hasattr(model, 'angle_weight'):
+            print(f"  Angle weight: {model.angle_weight.item():.4f} (initial: 0.500)")
+        if hasattr(model, 'dihedral_weight'):
+            print(f"  Dihedral weight: {model.dihedral_weight.item():.4f} (initial: 0.300)")
+        if hasattr(model, 'nonbonded_weight'):
+            print(f"  Nonbonded weight: {model.nonbonded_weight.item():.4f} (initial: 0.200)")
 
 
 if __name__ == "__main__":
