@@ -405,10 +405,16 @@ class RNAPocketEncoder(nn.Module):
 
         Args:
             data: PyTorch Geometric Data object containing:
-                - x: Node features [num_nodes, input_dim]
-                - pos: Node positions [num_nodes, 3]
-                - edge_index: Edge indices [2, num_edges]
-                - batch: Batch indices [num_nodes] (for batched graphs)
+                - x: Node features [num_atoms, input_dim]
+                - pos: Node positions [num_atoms, 3]
+                - edge_index: Edge indices [2, num_edges] (bonded edges)
+                - batch: Batch indices [num_atoms] (for batched graphs)
+
+                Optional (for FFiNet-style multi-hop):
+                - triple_index: Angle paths [3, num_angles]
+                - quadra_index: Dihedral paths [4, num_dihedrals]
+                - nonbonded_edge_index: Non-bonded edges [2, num_nonbonded]
+                - edge_attr, triple_attr, quadra_attr: Edge/path attributes
 
         Returns:
             Pocket embeddings [batch_size, output_dim]
@@ -424,7 +430,10 @@ class RNAPocketEncoder(nn.Module):
         # Initial embedding
         h = self.input_embedding(x)
 
-        # Message passing
+        # Message passing (currently only uses edge_index)
+        # Note: multi-hop indices (triple_index, quadra_index) are available in data
+        # but not used in current E(3)-GNN implementation
+        # Future versions can incorporate these for FFiNet-style attention
         for i, layer in enumerate(self.mp_layers):
             h = layer(h, pos, edge_index)
 

@@ -27,148 +27,266 @@ from functools import partial
 import glob
 import ast
 
+# Import AMBER vocabulary utilities
+from amber_vocabulary import get_global_encoder
 
-def build_graph_from_files(rna_pdb_path, prmtop_path, distance_cutoff=4.0):
+
+def build_graph_from_files(rna_pdb_path, prmtop_path, distance_cutoff=5.0, add_nonbonded_edges=True):
     """
-    Build a molecular graph from RNA PDB and AMBER topology files.
+    Build a molecular graph from RNA PDB and AMBER topology files with FFiNet-style multi-hop interactions.
 
-    This function creates a consistent atom ordering using the PDB file as reference,
-    then extracts features from both RDKit and ParmEd.
+    This function creates a graph with:
+    - Node features: AMBER_ATOM_TYPE, CHARGE, RESIDUE_LABEL
+    - 1-hop edges: BONDS_WITHOUT_HYDROGEN (covalent bonds)
+    - 2-hop paths: ANGLES_WITHOUT_HYDROGEN (angle interactions)
+    - 3-hop paths: DIHEDRALS_WITHOUT_HYDROGEN (torsion interactions)
+    - Non-bonded edges: Spatial proximity with LJ parameters
 
     Args:
         rna_pdb_path: Path to RNA PDB file
         prmtop_path: Path to AMBER prmtop file
-        distance_cutoff: Distance cutoff for edge construction (Angstroms)
+        distance_cutoff: Distance cutoff for non-bonded edge construction (Angstroms)
+        add_nonbonded_edges: Whether to add non-bonded spatial edges
 
     Returns:
-        torch_geometric.data.Data object with node features, positions, and edges
+        torch_geometric.data.Data object with multi-hop graph structure
     """
     try:
-        # Load RNA with RDKit
-        mol = Chem.MolFromPDBFile(str(rna_pdb_path), removeHs=False, sanitize=False)
-        if mol is None:
-            print(f"Error: RDKit failed to load {rna_pdb_path}")
+        # Load AMBER topology with ParmEd (primary source of truth)
+        amber_parm = pmd.load_file(str(prmtop_path))
+        n_atoms = len(amber_parm.atoms)
+
+        if n_atoms == 0:
+            print(f"Error: No atoms found in {prmtop_path}")
             return None
 
-        # Try to sanitize
+        # ========================================
+        # 1. NODE FEATURES (AMBER-based with fixed vocabulary)
+        # ========================================
+
+        # Use global encoder with fixed vocabularies
+        encoder = get_global_encoder()
+
+        node_features = []
+        for atom in amber_parm.atoms:
+            # Encode all features using fixed vocabulary
+            features = encoder.encode_atom_features(
+                atom_type=atom.type,
+                charge=float(atom.charge),
+                residue_name=atom.residue.name,
+                atomic_number=atom.atomic_number
+            )
+            node_features.append(features)
+
+        # Convert to numpy first (avoids warning)
+        node_features_array = np.array(node_features, dtype=np.float32)
+        x = torch.from_numpy(node_features_array)
+
+        # ========================================
+        # 2. NODE POSITIONS (only from INPCRD)
+        # ========================================
+
+        # Load from .inpcrd file (more reliable than PDB for atom ordering)
+        inpcrd_path = Path(str(prmtop_path).replace('.prmtop', '.inpcrd'))
+        if not inpcrd_path.exists():
+            # Try alternative location
+            inpcrd_path = Path(str(rna_pdb_path).parent) / 'rna.inpcrd'
+
+        if not inpcrd_path.exists():
+            print(f"Error: INPCRD file not found. Searched: {inpcrd_path}")
+            return None
+
         try:
-            Chem.SanitizeMol(mol)
-        except:
-            print(f"Warning: Sanitization failed for {rna_pdb_path}")
-
-        # Load AMBER topology with ParmEd
-        amber_parm = pmd.load_file(str(prmtop_path))
-
-        # Get number of atoms
-        n_atoms = mol.GetNumAtoms()
-        n_amber_atoms = len(amber_parm.atoms)
-
-        if n_atoms != n_amber_atoms:
-            print(f"Warning: Atom count mismatch - RDKit: {n_atoms}, AMBER: {n_amber_atoms}")
-            # Use minimum to avoid index errors
-            n_atoms = min(n_atoms, n_amber_atoms)
-
-        # Create atom mapping: (resname, resid, atom_name) -> index
-        # Use RDKit PDB info as reference
-        atom_mapping = {}
-        for i, atom in enumerate(mol.GetAtoms()):
-            pdb_info = atom.GetPDBResidueInfo()
-            if pdb_info:
-                key = (
-                    pdb_info.GetResidueName().strip(),
-                    pdb_info.GetResidueNumber(),
-                    pdb_info.GetName().strip()
-                )
-                atom_mapping[key] = i
-
-        # Extract features from RDKit
-        rdkit_features = []
-        for i in range(n_atoms):
-            atom = mol.GetAtomWithIdx(i)
-
-            # Atomic number (one-hot encoding for common elements)
-            atomic_num = atom.GetAtomicNum()
-
-            # Hybridization
-            hybridization = atom.GetHybridization()
-            hyb_encoding = [0] * 5  # SP, SP2, SP3, SP3D, SP3D2
-            if hybridization == Chem.HybridizationType.SP:
-                hyb_encoding[0] = 1
-            elif hybridization == Chem.HybridizationType.SP2:
-                hyb_encoding[1] = 1
-            elif hybridization == Chem.HybridizationType.SP3:
-                hyb_encoding[2] = 1
-            elif hybridization == Chem.HybridizationType.SP3D:
-                hyb_encoding[3] = 1
-            elif hybridization == Chem.HybridizationType.SP3D2:
-                hyb_encoding[4] = 1
-
-            # Aromaticity
-            is_aromatic = float(atom.GetIsAromatic())
-
-            # Degree
-            degree = atom.GetDegree()
-
-            # Formal charge
-            formal_charge = atom.GetFormalCharge()
-
-            rdkit_features.append([
-                atomic_num,
-                *hyb_encoding,
-                is_aromatic,
-                degree,
-                formal_charge
-            ])
-
-        rdkit_features = np.array(rdkit_features, dtype=np.float32)
-
-        # Extract features from ParmEd (partial charges and atom types)
-        amber_features = []
-        for i in range(n_atoms):
-            atom = amber_parm.atoms[i]
-
-            # Partial charge
-            charge = float(atom.charge)
-
-            # AMBER atom type (convert to hash for now, or could use embedding)
-            atom_type_hash = hash(atom.type) % 1000  # Simple hash
-
-            amber_features.append([charge, atom_type_hash])
-
-        amber_features = np.array(amber_features, dtype=np.float32)
-
-        # Concatenate features
-        node_features = np.concatenate([rdkit_features, amber_features], axis=1)
-        x = torch.tensor(node_features, dtype=torch.float)
-
-        # Extract 3D coordinates from RDKit conformer
-        conf = mol.GetConformer()
-        positions = []
-        for i in range(n_atoms):
-            pos = conf.GetAtomPosition(i)
-            positions.append([pos.x, pos.y, pos.z])
+            # Load coordinates using ParmEd
+            coords = pmd.load_file(str(prmtop_path), str(inpcrd_path))
+            positions = coords.coordinates  # [n_atoms, 3] numpy array
+            positions = positions.tolist()
+        except Exception as e:
+            print(f"Error loading INPCRD file {inpcrd_path}: {e}")
+            return None
 
         pos = torch.tensor(positions, dtype=torch.float)
 
-        # Build edges based on distance cutoff
+        # ========================================
+        # 3. BONDED EDGES (1-hop) - BONDS_WITHOUT_HYDROGEN
+        # ========================================
+
         edge_index = []
-        for i in range(n_atoms):
-            for j in range(i+1, n_atoms):
-                dist = np.linalg.norm(positions[i] - np.array(positions[j]))
-                if dist <= distance_cutoff:
-                    # Add both directions (undirected graph)
-                    edge_index.append([i, j])
-                    edge_index.append([j, i])
+        edge_attr_bonded = []  # Store bond parameters
+
+        for bond in amber_parm.bonds:
+            # Skip bonds involving hydrogen (to match BONDS_WITHOUT_HYDROGEN)
+            atom1, atom2 = bond.atom1, bond.atom2
+            if atom1.atomic_number == 1 or atom2.atomic_number == 1:
+                continue
+
+            i, j = atom1.idx, atom2.idx
+
+            # Add both directions for undirected graph
+            edge_index.append([i, j])
+            edge_index.append([j, i])
+
+            # Bond parameters: [equilibrium_length, force_constant]
+            bond_params = [bond.type.req if bond.type else 1.5,
+                          bond.type.k if bond.type else 300.0]
+            edge_attr_bonded.extend([bond_params, bond_params])  # Same for both directions
 
         if len(edge_index) == 0:
-            print(f"Warning: No edges found with cutoff {distance_cutoff}")
-            # Add self-loops as fallback
-            edge_index = [[i, i] for i in range(n_atoms)]
+            print(f"Warning: No non-hydrogen bonds found in {prmtop_path}")
+            edge_index = [[i, i] for i in range(n_atoms)]  # Self-loops fallback
+            edge_attr_bonded = [[1.5, 300.0]] * n_atoms
 
         edge_index = torch.tensor(edge_index, dtype=torch.long).t().contiguous()
+        edge_attr_bonded = torch.tensor(edge_attr_bonded, dtype=torch.float)
 
-        # Create PyTorch Geometric Data object
-        data = Data(x=x, pos=pos, edge_index=edge_index)
+        # ========================================
+        # 4. ANGLE PATHS (2-hop) - ANGLES_WITHOUT_HYDROGEN
+        # ========================================
+
+        triple_index = []  # Format: [src, mid, dst]
+        triple_attr = []   # Angle parameters
+
+        for angle in amber_parm.angles:
+            # Skip angles involving hydrogen
+            atom1, atom2, atom3 = angle.atom1, angle.atom2, angle.atom3
+            if atom1.atomic_number == 1 or atom2.atomic_number == 1 or atom3.atomic_number == 1:
+                continue
+
+            i, j, k = atom1.idx, atom2.idx, atom3.idx
+
+            # Add path: i -> j -> k (j is the central atom)
+            triple_index.append([i, j, k])
+
+            # Angle parameters: [equilibrium_angle, force_constant]
+            angle_params = [angle.type.theteq if angle.type else 120.0,
+                           angle.type.k if angle.type else 50.0]
+            triple_attr.append(angle_params)
+
+        if len(triple_index) > 0:
+            triple_index = torch.tensor(triple_index, dtype=torch.long).t().contiguous()
+            triple_attr = torch.tensor(triple_attr, dtype=torch.float)
+        else:
+            triple_index = torch.zeros((3, 0), dtype=torch.long)
+            triple_attr = torch.zeros((0, 2), dtype=torch.float)
+
+        # ========================================
+        # 5. DIHEDRAL PATHS (3-hop) - DIHEDRALS_WITHOUT_HYDROGEN
+        # ========================================
+
+        quadra_index = []  # Format: [src, mid2, mid1, dst]
+        quadra_attr = []   # Dihedral parameters
+
+        for dihedral in amber_parm.dihedrals:
+            # Skip dihedrals involving hydrogen
+            atom1, atom2, atom3, atom4 = dihedral.atom1, dihedral.atom2, dihedral.atom3, dihedral.atom4
+            if any(atom.atomic_number == 1 for atom in [atom1, atom2, atom3, atom4]):
+                continue
+
+            i, j, k, l = atom1.idx, atom2.idx, atom3.idx, atom4.idx
+
+            # Add path: i -> j -> k -> l
+            quadra_index.append([i, j, k, l])
+
+            # Dihedral parameters: [force_constant, periodicity, phase]
+            dihedral_params = [
+                dihedral.type.phi_k if dihedral.type else 1.0,
+                dihedral.type.per if dihedral.type else 2.0,
+                dihedral.type.phase if dihedral.type else 0.0
+            ]
+            quadra_attr.append(dihedral_params)
+
+        if len(quadra_index) > 0:
+            quadra_index = torch.tensor(quadra_index, dtype=torch.long).t().contiguous()
+            quadra_attr = torch.tensor(quadra_attr, dtype=torch.float)
+        else:
+            quadra_index = torch.zeros((4, 0), dtype=torch.long)
+            quadra_attr = torch.zeros((0, 3), dtype=torch.float)
+
+        # ========================================
+        # 6. NON-BONDED EDGES (optional spatial proximity) with real LJ parameters
+        # ========================================
+
+        nonbonded_edges = []
+        nonbonded_attr = []  # LJ parameters
+
+        if add_nonbonded_edges:
+            # Build set of bonded pairs to exclude
+            bonded_pairs = set()
+            for bond in amber_parm.bonds:
+                i, j = bond.atom1.idx, bond.atom2.idx
+                bonded_pairs.add((min(i, j), max(i, j)))
+
+            # Extract LJ parameters from prmtop
+            try:
+                lj_acoef = np.array(amber_parm.parm_data['LENNARD_JONES_ACOEF'], dtype=np.float64)
+                lj_bcoef = np.array(amber_parm.parm_data['LENNARD_JONES_BCOEF'], dtype=np.float64)
+                nb_parm_index = np.array(amber_parm.parm_data['NONBONDED_PARM_INDEX'], dtype=np.int32)
+                ntypes = amber_parm.ptr('ntypes')  # Number of atom types
+            except KeyError as e:
+                print(f"Warning: Could not extract LJ parameters from prmtop: {e}")
+                lj_acoef = None
+                lj_bcoef = None
+
+            # Convert positions to numpy array if not already
+            positions_array = np.array(positions) if not isinstance(positions, np.ndarray) else positions
+
+            # Add spatial edges within cutoff (excluding bonded)
+            for i in range(n_atoms):
+                for j in range(i + 1, n_atoms):
+                    # Skip if already bonded
+                    if (i, j) in bonded_pairs:
+                        continue
+
+                    # Check distance
+                    dist = np.linalg.norm(positions_array[i] - positions_array[j])
+                    if dist <= distance_cutoff:
+                        # Extract real LJ parameters
+                        if lj_acoef is not None and lj_bcoef is not None:
+                            # Get atom type indices (nb_idx is 1-indexed in AMBER)
+                            type_i = amber_parm.atoms[i].nb_idx - 1
+                            type_j = amber_parm.atoms[j].nb_idx - 1
+
+                            # Calculate index into LJ parameter arrays
+                            # AMBER uses triangular matrix storage
+                            # Index formula: index = nb_parm_index[type_i * ntypes + type_j] - 1
+                            parm_idx = nb_parm_index[type_i * ntypes + type_j] - 1
+
+                            # Extract A and B coefficients
+                            lj_A = float(lj_acoef[parm_idx])
+                            lj_B = float(lj_bcoef[parm_idx])
+                        else:
+                            # Fallback to placeholder if extraction failed
+                            lj_A = 0.0
+                            lj_B = 0.0
+
+                        # Add both directions
+                        nonbonded_edges.append([i, j])
+                        nonbonded_edges.append([j, i])
+                        nonbonded_attr.extend([[lj_A, lj_B, dist], [lj_A, lj_B, dist]])
+
+        if len(nonbonded_edges) > 0:
+            nonbonded_edge_index = torch.tensor(nonbonded_edges, dtype=torch.long).t().contiguous()
+            nonbonded_edge_attr = torch.tensor(nonbonded_attr, dtype=torch.float)
+        else:
+            nonbonded_edge_index = torch.zeros((2, 0), dtype=torch.long)
+            nonbonded_edge_attr = torch.zeros((0, 3), dtype=torch.float)
+
+        # ========================================
+        # 7. CREATE DATA OBJECT
+        # ========================================
+
+        data = Data(
+            x=x,                              # Node features: [num_atoms, feature_dim]
+            pos=pos,                          # Positions: [num_atoms, 3]
+            edge_index=edge_index,            # Bonded edges (1-hop): [2, num_bonds]
+            edge_attr=edge_attr_bonded,       # Bond parameters: [num_bonds, 2]
+            triple_index=triple_index,        # Angle paths (2-hop): [3, num_angles]
+            triple_attr=triple_attr,          # Angle parameters: [num_angles, 2]
+            quadra_index=quadra_index,        # Dihedral paths (3-hop): [4, num_dihedrals]
+            quadra_attr=quadra_attr,          # Dihedral parameters: [num_dihedrals, 3]
+            nonbonded_edge_index=nonbonded_edge_index,  # Non-bonded edges: [2, num_nonbonded]
+            nonbonded_edge_attr=nonbonded_edge_attr     # LJ parameters: [num_nonbonded, 3]
+        )
 
         return data
 
