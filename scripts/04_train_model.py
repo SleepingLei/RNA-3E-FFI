@@ -280,7 +280,7 @@ def main():
                         help="Hidden layer irreps")
     parser.add_argument("--output_dim", type=int, default=1536,
                         help="Output embedding dimension")
-    parser.add_argument("--num_layers", type=int, default=4,
+    parser.add_argument("--num_layers", type=int, default=6,
                         help="Number of message passing layers")
     parser.add_argument("--num_radial_basis", type=int, default=8,
                         help="Number of radial basis functions")
@@ -292,14 +292,14 @@ def main():
                         help="Enable non-bonded interactions")
     parser.add_argument("--use_weight_constraints", action="store_true", default=False,
                         help="Use fixed version with weight constraints to prevent weights from going to zero")
-    parser.add_argument("--use_gate", action="store_true", default=False,
+    parser.add_argument("--use_gate", action="store_true", default=True,
                         help="Use gate activation (requires improved layers)")
     parser.add_argument("--use_layer_norm", action="store_true", default=False,
                         help="Use layer normalization (requires improved layers)")
     parser.add_argument("--pooling_type", type=str, default="attention",
                         choices=["attention", "mean", "sum", "max"],
                         help="Graph pooling type")
-    parser.add_argument("--dropout", type=float, default=0.0,
+    parser.add_argument("--dropout", type=float, default=0.05,
                         help="Dropout rate")
 
     # Training arguments
@@ -317,7 +317,7 @@ def main():
     parser.add_argument("--scheduler", type=str, default="plateau",
                         choices=["plateau", "cosine"],
                         help="Learning rate scheduler")
-    parser.add_argument("--patience", type=int, default=100,
+    parser.add_argument("--patience", type=int, default=30,
                         help="Early stopping patience")
     parser.add_argument("--num_workers", type=int, default=4,
                         help="Number of data loader workers")
@@ -333,15 +333,15 @@ def main():
                         help="Random seed")
 
     # Output arguments
-    parser.add_argument("--output_dir", type=str, default="models/checkpoints",
+    parser.add_argument("--output_dir", type=str, default="models/checkpoints_v2_normalized",
                         help="Output directory for checkpoints")
-    parser.add_argument("--save_every", type=int, default=5,
+    parser.add_argument("--save_every", type=int, default=10,
                         help="Save checkpoint every N epochs")
 
     # Resume training arguments
     parser.add_argument("--resume", action="store_true",
                         help="Resume training from a checkpoint")
-    parser.add_argument("--checkpoint", type=str, default="models/checkpoints/best_model.pt",
+    parser.add_argument("--checkpoint", type=str, default="models/checkpoints_v2_normalized/best_model.pt",
                         help="Path to checkpoint file to resume from")
 
     args = parser.parse_args()
