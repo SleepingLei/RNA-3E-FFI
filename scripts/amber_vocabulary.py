@@ -111,29 +111,29 @@ class AMBERFeatureEncoder:
 
     def encode_atom_type(self, atom_type: str) -> int:
         """
-        Encode AMBER atom type as integer index (1-indexed).
+        Encode AMBER atom type as integer index (0-indexed).
 
         Args:
             atom_type: AMBER atom type string
 
         Returns:
-            Integer index (1 to num_atom_types)
+            Integer index (0 to num_atom_types-1)
         """
         idx = self.atom_type_to_idx.get(atom_type, self.atom_type_to_idx['<UNK>'])
-        return idx + 1  # 1-indexed
+        return idx  # 0-indexed
 
     def encode_residue(self, residue_name: str) -> int:
         """
-        Encode residue name as integer index (1-indexed).
+        Encode residue name as integer index (0-indexed).
 
         Args:
             residue_name: Residue name string
 
         Returns:
-            Integer index (1 to num_residues)
+            Integer index (0 to num_residues-1)
         """
         idx = self.residue_to_idx.get(residue_name, self.residue_to_idx['<UNK>'])
-        return idx + 1  # 1-indexed
+        return idx  # 0-indexed
 
     def encode_atom_features(self, atom_type: str, charge: float, residue_name: str,
                             atomic_number: int) -> np.ndarray:
@@ -154,9 +154,9 @@ class AMBERFeatureEncoder:
 
         # Return as 4-dimensional feature vector
         features = np.array([
-            float(atom_type_idx),    # 1-70 (or 71 for UNK)
+            float(atom_type_idx),    # 0-69 (0-68 normal, 69 UNK)
             float(charge),            # scalar
-            float(residue_idx),       # 1-43 (or 44 for UNK)
+            float(residue_idx),       # 0-42 (0-41 normal, 42 UNK)
             float(atomic_number)      # scalar
         ], dtype=np.float32)
 

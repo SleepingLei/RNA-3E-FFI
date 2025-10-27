@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Inference Script for RNA Pocket Encoder
+Inference Script for RNA Pocket Encoder V2
 
-This script uses the trained model to predict pocket embeddings and
+This script uses the trained v2 model to predict pocket embeddings and
 find similar ligands from a pre-computed library.
 """
 import os
@@ -15,47 +15,61 @@ import torch
 import h5py
 from tqdm import tqdm
 
-# Add models directory to path
+# Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from models.e3_gnn_encoder import RNAPocketEncoder
+from models.e3_gnn_encoder_v2 import RNAPocketEncoderV2
+from scripts.amber_vocabulary import get_global_encoder
 
 
-def load_model(checkpoint_path, input_dim, hidden_irreps, output_dim, num_layers, num_radial_basis, device):
+def load_model(checkpoint_path, device):
     """
-    Load trained model from checkpoint.
+    Load trained v2 model from checkpoint.
 
     Args:
         checkpoint_path: Path to model checkpoint
-        input_dim: Input feature dimension
-        hidden_irreps: Hidden layer irreps
-        output_dim: Output embedding dimension
-        num_layers: Number of message passing layers
-        num_radial_basis: Number of radial basis functions
         device: Device to load model on
 
     Returns:
-        Loaded model
+        Loaded model and its configuration
     """
     print(f"Loading model from {checkpoint_path}...")
 
-    # Initialize model
-    model = RNAPocketEncoder(
-        input_dim=input_dim,
-        hidden_irreps=hidden_irreps,
-        output_dim=output_dim,
-        num_layers=num_layers,
-        num_radial_basis=num_radial_basis
-    )
-
     # Load checkpoint
     checkpoint = torch.load(checkpoint_path, map_location=device)
+
+    # Get model config from checkpoint
+    config = checkpoint.get('config', {})
+    if not config:
+        raise ValueError("Checkpoint does not contain model configuration. "
+                       "Please use a checkpoint saved with v2 training script.")
+
+    # Get encoder for vocabulary sizes
+    encoder = get_global_encoder()
+
+    # Initialize model with config from checkpoint
+    model = RNAPocketEncoderV2(
+        num_atom_types=encoder.num_atom_types,
+        num_residues=encoder.num_residues,
+        atom_embed_dim=config.get('atom_embed_dim', 64),
+        residue_embed_dim=config.get('residue_embed_dim', 32),
+        hidden_dim=config.get('hidden_dim', 128),
+        num_layers=config.get('num_layers', 3),
+        use_multi_hop=config.get('use_multi_hop', True),
+        use_nonbonded=config.get('use_nonbonded', True),
+        pooling=config.get('pooling', 'attention')
+    )
+
+    # Load model weights
     model.load_state_dict(checkpoint['model_state_dict'])
 
     model = model.to(device)
     model.eval()
 
-    print(f"Model loaded successfully (epoch {checkpoint.get('epoch', 'unknown')})")
-    return model
+    epoch = checkpoint.get('epoch', 'unknown')
+    best_val_loss = checkpoint.get('best_val_loss', 'unknown')
+    print(f"Model loaded successfully (epoch {epoch}, best val loss: {best_val_loss})")
+
+    return model, config
 
 
 def predict_pocket_embedding(pocket_graph, model, device):
@@ -76,66 +90,67 @@ def predict_pocket_embedding(pocket_graph, model, device):
         # Move graph to device
         pocket_graph = pocket_graph.to(device)
 
-        # Ensure batch attribute exists for single graph inference
-        if not hasattr(pocket_graph, 'batch') or pocket_graph.batch is None:
-            pocket_graph.batch = torch.zeros(pocket_graph.num_nodes, dtype=torch.long, device=device)
-
         # Forward pass
         embedding = model(pocket_graph)
 
         # Convert to numpy
-        embedding_np = embedding.cpu().numpy()
+        embedding = embedding.cpu().numpy()
 
-        # Handle batch dimension
-        if len(embedding_np.shape) > 1 and embedding_np.shape[0] == 1:
-            embedding_np = embedding_np[0]
-
-    return embedding_np
+    return embedding
 
 
-def calculate_distance(embedding1, embedding2, metric='euclidean'):
+def load_ligand_library(library_path):
     """
-    Calculate distance between two embeddings.
+    Load pre-computed ligand embeddings from HDF5 file.
 
     Args:
-        embedding1: First embedding vector
-        embedding2: Second embedding vector
-        metric: Distance metric ('euclidean' or 'cosine')
+        library_path: Path to HDF5 file containing ligand embeddings
 
     Returns:
-        Distance value
+        Dictionary mapping ligand IDs to embeddings
     """
-    if metric == 'euclidean':
-        return np.linalg.norm(embedding1 - embedding2)
-    elif metric == 'cosine':
-        # Cosine distance = 1 - cosine similarity
-        dot_product = np.dot(embedding1, embedding2)
-        norm1 = np.linalg.norm(embedding1)
-        norm2 = np.linalg.norm(embedding2)
-        cosine_sim = dot_product / (norm1 * norm2 + 1e-8)
-        return 1 - cosine_sim
-    else:
-        raise ValueError(f"Unknown metric: {metric}")
+    print(f"Loading ligand library from {library_path}...")
+
+    ligand_library = {}
+
+    with h5py.File(library_path, 'r') as f:
+        # Iterate through all ligand IDs
+        for ligand_id in f.keys():
+            embedding = f[ligand_id][:]
+            ligand_library[ligand_id] = embedding
+
+    print(f"Loaded {len(ligand_library)} ligand embeddings")
+    return ligand_library
 
 
-def find_similar_ligands(query_embedding, ligand_library, top_k=10, metric='euclidean'):
+def find_similar_ligands(query_embedding, ligand_library, top_k=10, metric='cosine'):
     """
-    Find the top-k most similar ligands from a library.
+    Find top-k most similar ligands based on embedding distance.
 
     Args:
         query_embedding: Query pocket embedding
-        ligand_library: Dictionary mapping ligand IDs to embeddings
+        ligand_library: Dictionary of ligand embeddings
         top_k: Number of top matches to return
-        metric: Distance metric to use
+        metric: Distance metric ('cosine' or 'euclidean')
 
     Returns:
-        List of tuples (ligand_id, distance) sorted by distance
+        List of (ligand_id, distance) tuples sorted by distance
     """
     distances = []
 
     for ligand_id, ligand_embedding in ligand_library.items():
-        dist = calculate_distance(query_embedding, ligand_embedding, metric)
-        distances.append((ligand_id, dist))
+        if metric == 'cosine':
+            # Cosine distance = 1 - cosine similarity
+            similarity = np.dot(query_embedding, ligand_embedding) / (
+                np.linalg.norm(query_embedding) * np.linalg.norm(ligand_embedding)
+            )
+            distance = 1 - similarity
+        elif metric == 'euclidean':
+            distance = np.linalg.norm(query_embedding - ligand_embedding)
+        else:
+            raise ValueError(f"Unknown metric: {metric}")
+
+        distances.append((ligand_id, distance))
 
     # Sort by distance (ascending)
     distances.sort(key=lambda x: x[1])
@@ -143,94 +158,38 @@ def find_similar_ligands(query_embedding, ligand_library, top_k=10, metric='eucl
     return distances[:top_k]
 
 
-def load_ligand_library(embeddings_path):
-    """
-    Load pre-computed ligand embeddings.
-
-    Args:
-        embeddings_path: Path to HDF5 file containing ligand embeddings
-
-    Returns:
-        Dictionary mapping complex IDs to embedding vectors
-    """
-    print(f"Loading ligand library from {embeddings_path}...")
-
-    ligand_library = {}
-    with h5py.File(embeddings_path, 'r') as f:
-        for complex_id in tqdm(f.keys(), desc="Loading embeddings"):
-            ligand_library[complex_id] = np.array(f[complex_id][:])
-
-    print(f"Loaded {len(ligand_library)} ligand embeddings")
-    return ligand_library
-
-
 def main():
-    """Main inference pipeline."""
-    parser = argparse.ArgumentParser(description="Run inference with trained RNA Pocket Encoder")
+    parser = argparse.ArgumentParser(description="Run inference with trained RNA pocket encoder")
 
-    # Model arguments
+    # Required arguments
     parser.add_argument("--checkpoint", type=str, required=True,
                         help="Path to model checkpoint")
-    parser.add_argument("--config", type=str, default=None,
-                        help="Path to config JSON (optional, will use defaults if not provided)")
-
-    # Data arguments
     parser.add_argument("--query_graph", type=str, required=True,
                         help="Path to query pocket graph (.pt file)")
-    parser.add_argument("--ligand_library", type=str, required=True,
-                        help="Path to ligand embeddings HDF5 file")
 
-    # Inference arguments
+    # Optional arguments
+    parser.add_argument("--ligand_library", type=str, default=None,
+                        help="Path to ligand embedding library (HDF5 file)")
+    parser.add_argument("--output", type=str, default=None,
+                        help="Path to save results (JSON)")
     parser.add_argument("--top_k", type=int, default=10,
                         help="Number of top matches to return")
-    parser.add_argument("--metric", type=str, default='euclidean',
-                        choices=['euclidean', 'cosine'],
-                        help="Distance metric to use")
-    parser.add_argument("--output", type=str, default=None,
-                        help="Output file for results (JSON)")
-
-    # Model architecture (defaults, can be overridden by config)
-    parser.add_argument("--input_dim", type=int, default=11,
-                        help="Input feature dimension")
-    parser.add_argument("--hidden_irreps", type=str, default="32x0e + 16x1o + 8x2e",
-                        help="Hidden layer irreps")
-    parser.add_argument("--output_dim", type=int, default=1536,
-                        help="Output embedding dimension")
-    parser.add_argument("--num_layers", type=int, default=4,
-                        help="Number of message passing layers")
-    parser.add_argument("--num_radial_basis", type=int, default=8,
-                        help="Number of radial basis functions")
+    parser.add_argument("--metric", type=str, default="cosine",
+                        choices=['cosine', 'euclidean'],
+                        help="Distance metric for similarity search")
 
     args = parser.parse_args()
-
-    # Load config if provided
-    if args.config and Path(args.config).exists():
-        print(f"Loading config from {args.config}")
-        with open(args.config, 'r') as f:
-            config = json.load(f)
-        # Override args with config values
-        for key, value in config.items():
-            if hasattr(args, key):
-                setattr(args, key, value)
 
     # Setup device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
 
     # Load model
-    model = load_model(
-        args.checkpoint,
-        args.input_dim,
-        args.hidden_irreps,
-        args.output_dim,
-        args.num_layers,
-        args.num_radial_basis,
-        device
-    )
+    model, config = load_model(args.checkpoint, device)
 
     # Load query pocket graph
     print(f"\nLoading query pocket from {args.query_graph}...")
-    query_graph = torch.load(args.query_graph)
+    query_graph = torch.load(args.query_graph, weights_only=False)
     print(f"Query graph: {query_graph.num_nodes} nodes, {query_graph.num_edges} edges")
 
     # Predict query embedding
@@ -238,111 +197,139 @@ def main():
     query_embedding = predict_pocket_embedding(query_graph, model, device)
     print(f"Predicted embedding shape: {query_embedding.shape}")
 
-    # Load ligand library
-    ligand_library = load_ligand_library(args.ligand_library)
+    # If ligand library provided, find similar ligands
+    if args.ligand_library:
+        # Load ligand library
+        ligand_library = load_ligand_library(args.ligand_library)
 
-    # Find similar ligands
-    print(f"\nFinding top-{args.top_k} similar ligands using {args.metric} distance...")
-    similar_ligands = find_similar_ligands(
-        query_embedding,
-        ligand_library,
-        top_k=args.top_k,
-        metric=args.metric
-    )
+        # Find similar ligands
+        print(f"\nFinding top-{args.top_k} similar ligands using {args.metric} distance...")
+        similar_ligands = find_similar_ligands(
+            query_embedding,
+            ligand_library,
+            top_k=args.top_k,
+            metric=args.metric
+        )
 
-    # Print results
-    print("\nTop matches:")
-    print("-" * 60)
-    for rank, (ligand_id, distance) in enumerate(similar_ligands, 1):
-        print(f"{rank:2d}. {ligand_id:30s} Distance: {distance:.6f}")
+        # Print results
+        print("\nTop matches:")
+        print("-" * 60)
+        for rank, (ligand_id, distance) in enumerate(similar_ligands, 1):
+            print(f"{rank:2d}. {ligand_id:30s} Distance: {distance:.6f}")
 
-    # Save results if output path provided
-    if args.output:
-        results = {
-            'query': str(args.query_graph),
-            'metric': args.metric,
-            'top_k': args.top_k,
-            'query_embedding': query_embedding.tolist(),
-            'matches': [
-                {
-                    'rank': rank,
-                    'ligand_id': ligand_id,
-                    'distance': float(distance)
-                }
-                for rank, (ligand_id, distance) in enumerate(similar_ligands, 1)
-            ]
-        }
+        # Save results if output path provided
+        if args.output:
+            results = {
+                'query': str(args.query_graph),
+                'metric': args.metric,
+                'top_k': args.top_k,
+                'query_embedding': query_embedding.tolist(),
+                'matches': [
+                    {
+                        'rank': rank,
+                        'ligand_id': ligand_id,
+                        'distance': float(distance)
+                    }
+                    for rank, (ligand_id, distance) in enumerate(similar_ligands, 1)
+                ]
+            }
 
-        output_path = Path(args.output)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path = Path(args.output)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        with open(output_path, 'w') as f:
-            json.dump(results, f, indent=2)
+            with open(output_path, 'w') as f:
+                json.dump(results, f, indent=2)
 
-        print(f"\nResults saved to {output_path}")
+            print(f"\nResults saved to {output_path}")
+
+    else:
+        # Just save the embedding
+        if args.output:
+            results = {
+                'query': str(args.query_graph),
+                'embedding': query_embedding.tolist()
+            }
+
+            output_path = Path(args.output)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+
+            with open(output_path, 'w') as f:
+                json.dump(results, f, indent=2)
+
+            print(f"\nEmbedding saved to {output_path}")
 
 
-def batch_inference_example():
+def batch_inference(checkpoint_path, graph_dir, output_path, device=None):
     """
-    Example function demonstrating batch inference on multiple pockets.
+    Run inference on multiple pocket graphs and save embeddings.
 
-    Note: Graph files may have format {pdb_id}_{ligand}_model{N}.pt (with model numbers)
-          but ligand library keys are {pdb_id}_{ligand} (without model numbers).
-          The ligand embeddings are shared across all models of the same complex.
+    Args:
+        checkpoint_path: Path to model checkpoint
+        graph_dir: Directory containing pocket graph files
+        output_path: Path to save output embeddings (HDF5 or NPZ)
+        device: Device to use (defaults to cuda if available)
+
+    Example:
+        batch_inference(
+            checkpoint_path="models/checkpoints/best_model.pt",
+            graph_dir="data/processed/",
+            output_path="data/pocket_embeddings.h5"
+        )
     """
-    print("This is an example function for batch inference.")
-    print("To use it, modify the code below with your specific paths and requirements.")
+    if device is None:
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    # Example usage:
-    # checkpoint_path = "models/checkpoints/best_model.pt"
-    # graph_dir = "data/processed/graphs"
-    # ligand_library_path = "data/processed/ligand_embeddings.h5"
-    # output_dir = "results/predictions"
+    print(f"Running batch inference on {graph_dir}")
+    print(f"Using device: {device}")
 
-    # # Load model
-    # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    # model = load_model(checkpoint_path, ...)
+    # Load model
+    model, config = load_model(checkpoint_path, device)
 
-    # # Load ligand library
-    # ligand_library = load_ligand_library(ligand_library_path)
+    # Find all graph files
+    graph_files = list(Path(graph_dir).glob("*_pocket_graph.pt"))
+    print(f"Found {len(graph_files)} pocket graphs")
 
-    # # Process all graphs in directory
-    # graph_dir = Path(graph_dir)
-    # results = {}
+    # Predict embeddings
+    embeddings = {}
 
-    # for graph_path in tqdm(list(graph_dir.glob("*.pt"))):
-    #     complex_id = graph_path.stem  # e.g., "1aju_ARG_model0"
-    #     graph = torch.load(graph_path)
-    #
-    #     # Predict embedding
-    #     embedding = predict_pocket_embedding(graph, model, device)
-    #
-    #     # Find similar ligands
-    #     # Note: ligand_library keys don't have model numbers
-    #     similar = find_similar_ligands(embedding, ligand_library, top_k=10)
-    #
-    #     results[complex_id] = similar
+    for graph_file in tqdm(graph_files, desc="Processing"):
+        try:
+            # Extract complex ID from filename
+            complex_id = graph_file.stem.replace('_pocket_graph', '')
 
-    # # Save results
-    # output_path = Path(output_dir) / "batch_results.json"
-    # output_path.parent.mkdir(parents=True, exist_ok=True)
-    # with open(output_path, 'w') as f:
-    #     json.dump(results, f, indent=2)
+            # Load graph
+            graph = torch.load(graph_file, weights_only=False)
+
+            # Predict embedding
+            embedding = predict_pocket_embedding(graph, model, device)
+
+            embeddings[complex_id] = embedding
+
+        except Exception as e:
+            print(f"Error processing {graph_file}: {e}")
+            continue
+
+    # Save embeddings
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if output_path.suffix == '.h5':
+        # Save as HDF5
+        with h5py.File(output_path, 'w') as f:
+            for complex_id, embedding in embeddings.items():
+                f.create_dataset(complex_id, data=embedding)
+        print(f"Saved {len(embeddings)} embeddings to {output_path}")
+
+    elif output_path.suffix == '.npz':
+        # Save as NPZ
+        np.savez(output_path, **embeddings)
+        print(f"Saved {len(embeddings)} embeddings to {output_path}")
+
+    else:
+        raise ValueError(f"Unknown output format: {output_path.suffix}. Use .h5 or .npz")
+
+    return embeddings
 
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1:
-        main()
-    else:
-        print("RNA Pocket Encoder - Inference Script")
-        print("=" * 60)
-        print("\nUsage:")
-        print("  python 05_run_inference.py --checkpoint <path> --query_graph <path> --ligand_library <path>")
-        print("\nExample:")
-        print("  python 05_run_inference.py \\")
-        print("    --checkpoint models/checkpoints/best_model.pt \\")
-        print("    --query_graph data/processed/graphs/1abc_LIG.pt \\")
-        print("    --ligand_library data/processed/ligand_embeddings.h5 \\")
-        print("    --top_k 10 \\")
-        print("    --output results/predictions.json")
-        print("\nFor more options, use --help")
+    main()

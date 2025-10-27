@@ -52,32 +52,28 @@ def load_model_from_checkpoint(checkpoint_path, device='cpu'):
     print(f"  Training epoch: {checkpoint.get('epoch', 'unknown')}")
     print(f"  Best val loss: {checkpoint.get('best_val_loss', 'unknown')}")
 
-    # Import appropriate model class
+    # Import appropriate model class and encoder
     if model_version == 'v2':
         from models.e3_gnn_encoder_v2 import RNAPocketEncoderV2
+        from scripts.amber_vocabulary import get_global_encoder
+
+        # Get encoder for vocabulary sizes
+        encoder = get_global_encoder()
 
         model = RNAPocketEncoderV2(
-            atom_type_vocab_size=config.get('atom_type_vocab_size', 100),
-            residue_vocab_size=config.get('residue_vocab_size', 50),
-            hidden_irreps=config.get('hidden_irreps', '64x0e + 32x1o + 16x2e'),
-            output_dim=config.get('output_dim', 512),
-            num_layers=config.get('num_layers', 4),
-            num_radial_basis=config.get('num_radial_basis', 8),
-            max_radius=config.get('max_radius', 5.0),
+            num_atom_types=encoder.num_atom_types,
+            num_residues=encoder.num_residues,
+            atom_embed_dim=config.get('atom_embed_dim', 64),
+            residue_embed_dim=config.get('residue_embed_dim', 32),
+            hidden_dim=config.get('hidden_dim', 128),
+            num_layers=config.get('num_layers', 3),
             use_multi_hop=config.get('use_multi_hop', True),
-            use_nonbonded=config.get('use_nonbonded', True)
+            use_nonbonded=config.get('use_nonbonded', True),
+            pooling=config.get('pooling', 'attention')
         )
     else:
-        # v1 or other versions
-        from models.e3_gnn_encoder import RNAPocketEncoder
-
-        model = RNAPocketEncoder(
-            input_dim=config.get('input_dim', 11),
-            hidden_irreps=config.get('hidden_irreps', '32x0e + 16x1o + 8x2e'),
-            output_dim=config.get('output_dim', 512),
-            num_layers=config.get('num_layers', 4),
-            num_radial_basis=config.get('num_radial_basis', 8)
-        )
+        raise ValueError(f"Model version '{model_version}' is no longer supported. "
+                        "Please use v2 models only.")
 
     # Load state dict
     model.load_state_dict(checkpoint['model_state_dict'])

@@ -90,17 +90,15 @@ class AMBERFeatureEmbedding(nn.Module):
         self.num_residues = num_residues
         self.output_irreps = o3.Irreps(output_irreps)
 
-        # Embedding layers for discrete features (use padding_idx=0 for missing)
+        # Embedding layers for discrete features (0-indexed, including UNK)
         self.atom_type_embedding = nn.Embedding(
-            num_embeddings=num_atom_types + 1,  # +1 for padding
-            embedding_dim=atom_embed_dim,
-            padding_idx=0
+            num_embeddings=num_atom_types,  # Includes UNK token
+            embedding_dim=atom_embed_dim
         )
 
         self.residue_embedding = nn.Embedding(
-            num_embeddings=num_residues + 1,  # +1 for padding
-            embedding_dim=residue_embed_dim,
-            padding_idx=0
+            num_embeddings=num_residues,  # Includes UNK token
+            embedding_dim=residue_embed_dim
         )
 
         # Linear projection for continuous features
@@ -140,9 +138,9 @@ class AMBERFeatureEmbedding(nn.Module):
 
         Args:
             x: Node features [num_atoms, 4]
-               x[:, 0] = atom_type_idx (int, 1-indexed)
+               x[:, 0] = atom_type_idx (int, 0-indexed, 0-68 normal, 69 UNK)
                x[:, 1] = charge (float)
-               x[:, 2] = residue_idx (int, 1-indexed)
+               x[:, 2] = residue_idx (int, 0-indexed, 0-41 normal, 42 UNK)
                x[:, 3] = atomic_num (int)
 
         Returns:

@@ -162,13 +162,31 @@ def test_model_forward():
     sample_data = sample_data.to(device)
 
     print(f"\nModel embedding sizes:")
-    print(f"  - atom_type_embedding: {model.input_embedding.atom_type_embedding.num_embeddings}")
-    print(f"  - residue_embedding: {model.input_embedding.residue_embedding.num_embeddings}")
+    print(f"  - atom_type_embedding: {model.input_embedding.atom_type_embedding.num_embeddings} (valid indices: 0-{model.input_embedding.atom_type_embedding.num_embeddings-1})")
+    print(f"  - residue_embedding: {model.input_embedding.residue_embedding.num_embeddings} (valid indices: 0-{model.input_embedding.residue_embedding.num_embeddings-1})")
 
     print(f"\nInput data:")
     print(f"  - x.shape: {sample_data.x.shape}")
     print(f"  - atom_type range: [{sample_data.x[:, 0].min()}, {sample_data.x[:, 0].max()}]")
     print(f"  - residue range: [{sample_data.x[:, 2].min()}, {sample_data.x[:, 2].max()}]")
+
+    # Detailed check before forward pass
+    atom_idx = sample_data.x[:, 0].long()
+    residue_idx = sample_data.x[:, 2].long()
+    max_atom_embed = model.input_embedding.atom_type_embedding.num_embeddings
+    max_residue_embed = model.input_embedding.residue_embedding.num_embeddings
+
+    if (atom_idx >= max_atom_embed).any() or (atom_idx < 0).any():
+        print("\n⚠️  WARNING: Atom indices out of bounds BEFORE forward pass!")
+        bad_mask = (atom_idx >= max_atom_embed) | (atom_idx < 0)
+        print(f"  - {bad_mask.sum()} atoms with invalid indices")
+        print(f"  - Invalid indices: {atom_idx[bad_mask].tolist()[:10]}")
+
+    if (residue_idx >= max_residue_embed).any() or (residue_idx < 0).any():
+        print("\n⚠️  WARNING: Residue indices out of bounds BEFORE forward pass!")
+        bad_mask = (residue_idx >= max_residue_embed) | (residue_idx < 0)
+        print(f"  - {bad_mask.sum()} atoms with invalid indices")
+        print(f"  - Invalid indices: {residue_idx[bad_mask].tolist()[:10]}")
 
     # Try forward pass
     try:
