@@ -84,3 +84,4 @@ data/
 archive/
 docs/
 nohup.out
+./*md

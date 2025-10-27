@@ -316,7 +316,7 @@ def main():
     parser.add_argument("--scheduler", type=str, default="plateau",
                         choices=["plateau", "cosine"],
                         help="Learning rate scheduler")
-    parser.add_argument("--patience", type=int, default=10,
+    parser.add_argument("--patience", type=int, default=100,
                         help="Early stopping patience")
     parser.add_argument("--num_workers", type=int, default=4,
                         help="Number of data loader workers")
