@@ -69,7 +69,7 @@ def check_data_files(encoder, max_check=10):
         if checked >= max_check:
             break
 
-        graph_path = Path(f"data/processed_v2/{complex_id}_pocket_graph.pt")
+        graph_path = Path(f"data/processed/graphs/{complex_id}.pt")
 
         if not graph_path.exists():
             continue
@@ -125,7 +125,7 @@ def test_model_forward():
     sample_data = None
     sample_id = None
     for complex_id in train_ids[:50]:
-        graph_path = Path(f"data/processed_v2/{complex_id}_pocket_graph.pt")
+        graph_path = Path(f"data/processed/graphs/{complex_id}.pt")
         if graph_path.exists():
             sample_data = torch.load(graph_path, weights_only=False)
             sample_id = complex_id
@@ -148,11 +148,12 @@ def test_model_forward():
         num_residues=encoder.num_residues,
         atom_embed_dim=64,
         residue_embed_dim=32,
-        hidden_dim=128,
+        hidden_irreps="64x0e + 32x1o + 16x2e",
+        output_dim=512,
         num_layers=3,
         use_multi_hop=True,
         use_nonbonded=True,
-        pooling='attention'
+        pooling_type='attention'
     )
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')

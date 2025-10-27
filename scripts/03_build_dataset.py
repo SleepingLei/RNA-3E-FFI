@@ -618,17 +618,37 @@ def build_and_save_graphs(hariboss_csv, pocket_dir, amber_dir, output_dir, dista
             print(f"Collected features from {len(all_node_features)} graphs")
             print(f"Total atoms: {all_features.shape[0]}, Feature dim: {all_features.shape[1]}")
 
-            # Compute global statistics
-            feature_mean = np.mean(all_features, axis=0)
-            feature_std = np.std(all_features, axis=0)
-            # Add small epsilon to avoid division by zero for constant features
-            feature_std = np.where(feature_std < 1e-8, 1.0, feature_std)
+            # Feature vector: [atom_type_idx, charge, residue_idx, atomic_num]
+            # Only normalize continuous features (indices 1 and 3)
+            # DO NOT normalize discrete indices (0 and 2)
+
+            continuous_indices = [1, 3]  # charge and atomic_num
+
+            # Compute statistics only for continuous features
+            feature_mean = np.zeros(all_features.shape[1])
+            feature_std = np.ones(all_features.shape[1])
+
+            feature_mean[continuous_indices] = np.mean(all_features[:, continuous_indices], axis=0)
+            feature_std[continuous_indices] = np.std(all_features[:, continuous_indices], axis=0)
+
+            # Add small epsilon to avoid division by zero
+            feature_std[continuous_indices] = np.where(
+                feature_std[continuous_indices] < 1e-8,
+                1.0,
+                feature_std[continuous_indices]
+            )
+
+            print(f"\nNormalization parameters (only for continuous features):")
+            print(f"  Charge (idx 1): mean={feature_mean[1]:.4f}, std={feature_std[1]:.4f}")
+            print(f"  Atomic num (idx 3): mean={feature_mean[3]:.4f}, std={feature_std[3]:.4f}")
+            print(f"  Note: Discrete indices (0=atom_type, 2=residue) are NOT normalized")
 
             # Save normalization parameters
             norm_params_path = output_dir.parent / "node_feature_norm_params.npz"
             np.savez(norm_params_path,
                      mean=feature_mean,
-                     std=feature_std)
+                     std=feature_std,
+                     continuous_indices=continuous_indices)
             print(f"Saved normalization parameters to {norm_params_path}")
 
             # Apply normalization to all graphs and resave
@@ -637,8 +657,11 @@ def build_and_save_graphs(hariboss_csv, pocket_dir, amber_dir, output_dir, dista
                 try:
                     data = torch.load(graph_path)
                     if hasattr(data, 'x') and data.x is not None:
-                        # Apply normalization
-                        x_normalized = (data.x.numpy() - feature_mean) / feature_std
+                        # Apply normalization only to continuous features
+                        x_normalized = data.x.numpy().copy()
+                        x_normalized[:, continuous_indices] = (
+                            x_normalized[:, continuous_indices] - feature_mean[continuous_indices]
+                        ) / feature_std[continuous_indices]
                         data.x = torch.from_numpy(x_normalized.astype(np.float32))
                         # Save normalized graph
                         torch.save(data, graph_path)

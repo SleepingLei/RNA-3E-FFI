@@ -29,10 +29,9 @@ def check_data_indices():
     problematic_samples = []
 
     for complex_id in tqdm(train_ids, desc="Checking indices"):
-        graph_path = Path(f"data/processed_v2/{complex_id}_pocket_graph.pt")
+        graph_path = Path(f"data/processed/graphs/{complex_id}.pt")
 
         if not graph_path.exists():
-            print(f"Warning: {graph_path} not found")
             continue
 
         try:

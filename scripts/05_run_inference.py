@@ -286,7 +286,7 @@ def batch_inference(checkpoint_path, graph_dir, output_path, device=None):
     model, config = load_model(checkpoint_path, device)
 
     # Find all graph files
-    graph_files = list(Path(graph_dir).glob("*_pocket_graph.pt"))
+    graph_files = list(Path(graph_dir).glob("*.pt"))
     print(f"Found {len(graph_files)} pocket graphs")
 
     # Predict embeddings
@@ -295,7 +295,7 @@ def batch_inference(checkpoint_path, graph_dir, output_path, device=None):
     for graph_file in tqdm(graph_files, desc="Processing"):
         try:
             # Extract complex ID from filename
-            complex_id = graph_file.stem.replace('_pocket_graph', '')
+            complex_id = graph_file.stem
 
             # Load graph
             graph = torch.load(graph_file, weights_only=False)
