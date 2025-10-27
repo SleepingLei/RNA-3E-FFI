@@ -591,6 +591,64 @@ def build_and_save_graphs(hariboss_csv, pocket_dir, amber_dir, output_dir, dista
         failed_df.to_csv(failed_path, index=False)
         print(f"Failed graphs saved to {failed_path}")
 
+    # ========================================
+    # Apply global feature normalization
+    # ========================================
+    if total_success > 0:
+        print(f"\n{'='*60}")
+        print(f"Computing global feature normalization parameters...")
+        print(f"{'='*60}\n")
+
+        # Collect all node features from saved graphs
+        all_node_features = []
+        graph_files = sorted(output_dir.glob("*.pt"))
+
+        print(f"Loading {len(graph_files)} graphs to collect features...")
+        for graph_path in tqdm(graph_files, desc="Collecting features"):
+            try:
+                data = torch.load(graph_path)
+                if hasattr(data, 'x') and data.x is not None:
+                    all_node_features.append(data.x.numpy())
+            except Exception as e:
+                print(f"Warning: Failed to load {graph_path}: {e}")
+
+        if len(all_node_features) > 0:
+            # Concatenate all features
+            all_features = np.vstack(all_node_features)
+            print(f"Collected features from {len(all_node_features)} graphs")
+            print(f"Total atoms: {all_features.shape[0]}, Feature dim: {all_features.shape[1]}")
+
+            # Compute global statistics
+            feature_mean = np.mean(all_features, axis=0)
+            feature_std = np.std(all_features, axis=0)
+            # Add small epsilon to avoid division by zero for constant features
+            feature_std = np.where(feature_std < 1e-8, 1.0, feature_std)
+
+            # Save normalization parameters
+            norm_params_path = output_dir.parent / "node_feature_norm_params.npz"
+            np.savez(norm_params_path,
+                     mean=feature_mean,
+                     std=feature_std)
+            print(f"Saved normalization parameters to {norm_params_path}")
+
+            # Apply normalization to all graphs and resave
+            print(f"\nApplying normalization to all graphs...")
+            for graph_path in tqdm(graph_files, desc="Normalizing graphs"):
+                try:
+                    data = torch.load(graph_path)
+                    if hasattr(data, 'x') and data.x is not None:
+                        # Apply normalization
+                        x_normalized = (data.x.numpy() - feature_mean) / feature_std
+                        data.x = torch.from_numpy(x_normalized.astype(np.float32))
+                        # Save normalized graph
+                        torch.save(data, graph_path)
+                except Exception as e:
+                    print(f"Warning: Failed to normalize {graph_path}: {e}")
+
+            print(f"Feature normalization complete!")
+        else:
+            print(f"Warning: No features collected, skipping normalization")
+
 
 def main():
     """Main graph construction pipeline."""

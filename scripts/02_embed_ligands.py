@@ -149,10 +149,29 @@ def generate_ligand_embeddings(smiles_list, complex_ids, output_h5_path, batch_s
                 traceback.print_exc()
                 # Continue with next batch
 
-        # Save embeddings to HDF5 file
-        print(f"\nSaving {len(embeddings_dict)} embeddings to {output_h5_path}...")
+        # Normalize all embeddings (z-score normalization across all embeddings)
+        print(f"\nNormalizing {len(embeddings_dict)} embeddings...")
+        all_embeddings = np.array(list(embeddings_dict.values()))
+        embedding_mean = np.mean(all_embeddings, axis=0, keepdims=True)
+        embedding_std = np.std(all_embeddings, axis=0, keepdims=True)
+        # Add small epsilon to avoid division by zero
+        embedding_std = np.where(embedding_std < 1e-8, 1.0, embedding_std)
+
+        # Save normalization parameters
         output_path = Path(output_h5_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
+        norm_params_path = output_path.parent / "ligand_embedding_norm_params.npz"
+        np.savez(norm_params_path,
+                 mean=embedding_mean.squeeze(),
+                 std=embedding_std.squeeze())
+        print(f"Saved normalization parameters to {norm_params_path}")
+
+        # Apply normalization to each embedding
+        for complex_id in embeddings_dict:
+            embeddings_dict[complex_id] = (embeddings_dict[complex_id] - embedding_mean.squeeze()) / embedding_std.squeeze()
+
+        # Save embeddings to HDF5 file
+        print(f"\nSaving {len(embeddings_dict)} normalized embeddings to {output_h5_path}...")
 
         with h5py.File(output_h5_path, 'w') as f:
             for complex_id, embedding in embeddings_dict.items():
