@@ -290,6 +290,8 @@ def main():
                         help="Enable multi-hop message passing (2-hop angles, 3-hop dihedrals)")
     parser.add_argument("--use_nonbonded", action="store_true", default=True,
                         help="Enable non-bonded interactions")
+    parser.add_argument("--use_weight_constraints", action="store_true", default=False,
+                        help="Use fixed version with weight constraints to prevent weights from going to zero")
     parser.add_argument("--use_gate", action="store_true", default=True,
                         help="Use gate activation (requires improved layers)")
     parser.add_argument("--use_layer_norm", action="store_true", default=False,
@@ -301,11 +303,11 @@ def main():
                         help="Dropout rate")
 
     # Training arguments
-    parser.add_argument("--batch_size", type=int, default=2,
+    parser.add_argument("--batch_size", type=int, default=4,
                         help="Batch size")
     parser.add_argument("--num_epochs", type=int, default=300,
                         help="Number of training epochs")
-    parser.add_argument("--lr", type=float, default=1e-4,
+    parser.add_argument("--lr", type=float, default=5e-3,
                         help="Learning rate")
     parser.add_argument("--weight_decay", type=float, default=1e-5,
                         help="Weight decay")
@@ -494,9 +496,13 @@ def main():
     # Initialize model (v2.0)
     print("\nInitializing v2.0 model...")
 
-    # Import model class
-    from models.e3_gnn_encoder_v2 import RNAPocketEncoderV2 as ModelClass
-    print("Using RNAPocketEncoderV2")
+    # Import appropriate model class based on weight constraints flag
+    if args.use_weight_constraints:
+        from models.e3_gnn_encoder_v2_fixed import RNAPocketEncoderV2Fixed as ModelClass
+        print("Using RNAPocketEncoderV2Fixed (with weight constraints)")
+    else:
+        from models.e3_gnn_encoder_v2 import RNAPocketEncoderV2 as ModelClass
+        print("Using RNAPocketEncoderV2 (standard)")
 
     # Get vocabulary sizes
     encoder = get_global_encoder()
@@ -705,6 +711,13 @@ def main():
         if hasattr(model, 'nonbonded_weight'):
             print(f"  Nonbonded weight: {model.nonbonded_weight.item():.4f} (initial: 0.200)")
 
+        # If using fixed version, show log-space parameters
+        if args.use_weight_constraints and hasattr(model, 'get_weight_summary'):
+            print("\nWeight constraints (log-space parameters):")
+            summary = model.get_weight_summary()
+            for key, value in summary.items():
+                if 'log' in key:
+                    print(f"  {key}: {value:.4f}")
 
 
 if __name__ == "__main__":
