@@ -65,11 +65,11 @@ def load_model_from_checkpoint(checkpoint_path, device='cpu'):
             num_residues=encoder.num_residues,
             atom_embed_dim=config.get('atom_embed_dim', 64),
             residue_embed_dim=config.get('residue_embed_dim', 32),
-            hidden_dim=config.get('hidden_dim', 128),
+            hidden_irreps=config.get('hidden_irreps', '32x0e + 16x1o + 8x2e'),
             num_layers=config.get('num_layers', 3),
             use_multi_hop=config.get('use_multi_hop', True),
             use_nonbonded=config.get('use_nonbonded', True),
-            pooling=config.get('pooling', 'attention')
+            pooling_type=config.get('pooling_type', 'attention')
         )
     else:
         raise ValueError(f"Model version '{model_version}' is no longer supported. "
