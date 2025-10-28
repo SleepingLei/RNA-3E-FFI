@@ -131,9 +131,10 @@ def load_ligand_library(embeddings_path):
 
     Args:
         embeddings_path: Path to HDF5 file with ligand embeddings
+                        (should be deduplicated with ligand names as keys)
 
     Returns:
-        Dictionary mapping ligand IDs to embeddings
+        Dictionary mapping ligand names (e.g., "ARG", "SAM") to embeddings
     """
     print(f"\nLoading ligand library from {embeddings_path}...")
 
@@ -146,19 +147,32 @@ def load_ligand_library(embeddings_path):
     return ligand_library
 
 
-def extract_base_ligand_id(complex_id):
+def extract_ligand_name(complex_id):
     """
-    Extract base ligand ID from complex ID.
+    Extract ligand name from complex ID.
 
     Args:
-        complex_id: e.g., "1aju_ARG_model0"
+        complex_id: e.g., "2kx8_ARG_model2" or "1uui_P12_model0"
 
     Returns:
-        Base ID without model number, e.g., "1aju_ARG"
+        Ligand name only, e.g., "ARG" or "P12"
     """
+    # Remove model suffix if present
     if '_model' in complex_id:
-        return '_'.join(complex_id.split('_model')[0].split('_'))
-    return complex_id
+        base = complex_id.split('_model')[0]
+    else:
+        base = complex_id
+
+    # Split by underscore and extract ligand part
+    # Format: <pdb_id>_<ligand_name>
+    parts = base.split('_')
+
+    if len(parts) >= 2:
+        # Return the ligand name (everything after first underscore)
+        return '_'.join(parts[1:])
+    else:
+        # Fallback: return as-is
+        return base
 
 
 def predict_embedding(model, graph, device):
@@ -252,9 +266,10 @@ def evaluate_test_set(model, test_ids, graph_dir, ligand_library, device,
 
     Args:
         model: Trained model
-        test_ids: List of test complex IDs
+        test_ids: List of test complex IDs (e.g., "2kx8_ARG_model2")
         graph_dir: Directory containing graph files
-        ligand_library: Dictionary of ligand embeddings
+        ligand_library: Dictionary of ligand embeddings with ligand names as keys
+                       (e.g., {"ARG": embedding, "SAM": embedding, ...})
         device: Device to run on
         metric: Distance metric for retrieval
         top_percentages: List of percentage thresholds for hit rate
@@ -311,8 +326,8 @@ def evaluate_test_set(model, test_ids, graph_dir, ligand_library, device,
             })
             continue
 
-        # Get ground truth ligand ID
-        true_ligand_id = extract_base_ligand_id(complex_id)
+        # Get ground truth ligand name
+        true_ligand_id = extract_ligand_name(complex_id)
 
         if true_ligand_id not in ligand_library:
             results['failed_predictions'].append({
@@ -491,8 +506,8 @@ def main():
     parser.add_argument("--graph_dir", type=str, default="data/processed/graphs",
                         help="Directory containing graph files")
     parser.add_argument("--ligand_embeddings", type=str,
-                        default="data/processed/ligand_embeddings.h5",
-                        help="Path to ligand embeddings HDF5 file")
+                        default="data/processed/ligand_embeddings_dedup.h5",
+                        help="Path to deduplicated ligand embeddings HDF5 file (with ligand names as keys)")
 
     # Optional arguments
     parser.add_argument("--output", type=str, default=None,
