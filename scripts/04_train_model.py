@@ -303,11 +303,11 @@ def main():
                         help="Dropout rate")
 
     # Training arguments
-    parser.add_argument("--batch_size", type=int, default=4,
+    parser.add_argument("--batch_size", type=int, default=2,
                         help="Batch size")
     parser.add_argument("--num_epochs", type=int, default=300,
                         help="Number of training epochs")
-    parser.add_argument("--lr", type=float, default=5e-3,
+    parser.add_argument("--lr", type=float, default=1e-3,
                         help="Learning rate")
     parser.add_argument("--weight_decay", type=float, default=1e-5,
                         help="Weight decay")
@@ -705,11 +705,11 @@ def main():
     if args.use_multi_hop or args.use_nonbonded:
         print("\nFinal learnable weights:")
         if hasattr(model, 'angle_weight'):
-            print(f"  Angle weight: {model.angle_weight.item():.4f} (initial: 0.500)")
+            print(f"  Angle weight: {model.angle_weight.item():.4f} (initial: 0.333)")
         if hasattr(model, 'dihedral_weight'):
-            print(f"  Dihedral weight: {model.dihedral_weight.item():.4f} (initial: 0.300)")
+            print(f"  Dihedral weight: {model.dihedral_weight.item():.4f} (initial: 0.333)")
         if hasattr(model, 'nonbonded_weight'):
-            print(f"  Nonbonded weight: {model.nonbonded_weight.item():.4f} (initial: 0.200)")
+            print(f"  Nonbonded weight: {model.nonbonded_weight.item():.4f} (initial: 0.333)")
 
         # If using fixed version, show log-space parameters
         if args.use_weight_constraints and hasattr(model, 'get_weight_summary'):

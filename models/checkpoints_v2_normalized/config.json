@@ -16,9 +16,9 @@
   "use_layer_norm": true,
   "pooling_type": "attention",
   "dropout": 0.05,
-  "batch_size": 4,
+  "batch_size": 2,
   "num_epochs": 300,
-  "lr": 0.005,
+  "lr": 0.001,
   "weight_decay": 1e-05,
   "optimizer": "adam",
   "scheduler": "plateau",
@@ -30,6 +30,6 @@
   "seed": 42,
   "output_dir": "models/checkpoints_v2_normalized",
   "save_every": 10,
-  "resume": false,
+  "resume": true,
   "checkpoint": "models/checkpoints_v2_normalized/best_model.pt"
 }

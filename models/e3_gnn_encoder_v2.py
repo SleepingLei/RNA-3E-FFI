@@ -647,10 +647,10 @@ class RNAPocketEncoderV2(nn.Module):
 
         # Learnable combining weights for multi-hop and non-bonded contributions
         if use_multi_hop:
-            self.angle_weight = nn.Parameter(torch.tensor(0.5))  # Initial: 0.5
-            self.dihedral_weight = nn.Parameter(torch.tensor(0.3))  # Initial: 0.3
+            self.angle_weight = nn.Parameter(torch.tensor(0.333))  # Initial: 0.5
+            self.dihedral_weight = nn.Parameter(torch.tensor(0.333))  # Initial: 0.3
         if use_nonbonded:
-            self.nonbonded_weight = nn.Parameter(torch.tensor(0.2))  # Initial: 0.2
+            self.nonbonded_weight = nn.Parameter(torch.tensor(0.333))  # Initial: 0.2
 
         # Input embedding
         self.input_embedding = AMBERFeatureEmbedding(
