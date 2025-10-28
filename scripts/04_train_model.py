@@ -131,17 +131,17 @@ class LigandEmbeddingDataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         complex_id = self.valid_ids[idx]
 
-        # Load graph
+        # Load graph (use weights_only=False for backward compatibility)
         graph_path = self.graph_dir / f"{complex_id}.pt"
-        data = torch.load(graph_path)
+        data = torch.load(graph_path, weights_only=False)
 
         # Get ligand embedding using the mapping
         # complex_id may be "1aju_ARG_model0", but embedding key is "1aju_ARG"
         embedding_key = self.id_to_embedding_key[complex_id]
         ligand_embedding = self.ligand_embeddings[embedding_key]
 
-        # Store target in data object
-        data.y = ligand_embedding
+        # Store target in data object (clone to avoid reference issues)
+        data.y = torch.tensor(ligand_embedding, dtype=torch.float32)
 
         return data
 
@@ -163,7 +163,7 @@ def train_epoch(model, loader, optimizer, device):
     total_loss = 0
     num_batches = 0
 
-    for batch in tqdm(loader, desc="Training"):
+    for batch_idx, batch in enumerate(tqdm(loader, desc="Training")):
         batch = batch.to(device)
 
         # Forward pass
@@ -188,11 +188,15 @@ def train_epoch(model, loader, optimizer, device):
 
         optimizer.step()
 
+        # Record loss before clearing variables
         total_loss += loss.item()
         num_batches += 1
 
-        # Clear cache to prevent OOM
-        if device.type == 'cuda':
+        # Explicitly delete to free memory
+        del pocket_embedding, target_embedding, loss
+
+        # Periodic cache clearing (every 10 batches to reduce overhead)
+        if device.type == 'cuda' and (batch_idx + 1) % 10 == 0:
             torch.cuda.empty_cache()
 
     # Get learnable weights if available
@@ -226,7 +230,7 @@ def evaluate(model, loader, device):
     num_batches = 0
 
     with torch.no_grad():
-        for batch in tqdm(loader, desc="Evaluating"):
+        for batch_idx, batch in enumerate(tqdm(loader, desc="Evaluating")):
             batch = batch.to(device)
 
             # Forward pass
@@ -247,8 +251,11 @@ def evaluate(model, loader, device):
             total_l1_loss += l1_loss.item()
             num_batches += 1
 
-            # Clear cache to prevent OOM
-            if device.type == 'cuda':
+            # Explicitly delete to free memory
+            del pocket_embedding, target_embedding, mse_loss, l1_loss
+
+            # Periodic cache clearing
+            if device.type == 'cuda' and (batch_idx + 1) % 10 == 0:
                 torch.cuda.empty_cache()
 
     return {
@@ -477,20 +484,23 @@ def main():
     val_dataset = LigandEmbeddingDataset(val_ids, args.graph_dir, args.embeddings_path)
 
     # Create data loaders
+    # Note: Reduced workers and disabled pin_memory to save GPU memory
     train_loader = DataLoader(
         train_dataset,
         batch_size=args.batch_size,
         shuffle=True,
-        num_workers=args.num_workers,
-        pin_memory=True if device.type == 'cuda' else False
+        num_workers=min(args.num_workers, 2),  # Limit to 2 workers max
+        pin_memory=False,  # Disable to save GPU memory
+        persistent_workers=False  # Don't keep workers alive between epochs
     )
 
     val_loader = DataLoader(
         val_dataset,
         batch_size=args.batch_size,
         shuffle=False,
-        num_workers=args.num_workers,
-        pin_memory=True if device.type == 'cuda' else False
+        num_workers=min(args.num_workers, 2),  # Limit to 2 workers max
+        pin_memory=False,  # Disable to save GPU memory
+        persistent_workers=False
     )
 
     # Initialize model (v2.0)
@@ -618,6 +628,11 @@ def main():
         print(f"Epoch {epoch}/{args.num_epochs}")
         print("-" * 60)
 
+        # Clear cache at start of epoch
+        if device.type == 'cuda':
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+
         # Train
         train_metrics = train_epoch(model, train_loader, optimizer, device)
         train_loss = train_metrics['loss']
@@ -684,6 +699,10 @@ def main():
         if patience_counter >= args.patience:
             print(f"\nEarly stopping triggered after {epoch} epochs")
             break
+
+        # Clear cache at end of epoch
+        if device.type == 'cuda':
+            torch.cuda.empty_cache()
 
         print()
 
