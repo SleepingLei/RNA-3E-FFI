@@ -44,8 +44,25 @@ def load_model_from_checkpoint(checkpoint_path, device='cpu'):
 
     checkpoint = torch.load(checkpoint_path, map_location=device)
 
-    # Get model config from checkpoint
+    # Get model config from checkpoint or config.json
     config = checkpoint.get('config', {})
+
+    # If config is missing or incomplete, try loading from config.json
+    checkpoint_dir = Path(checkpoint_path).parent
+    config_json_path = checkpoint_dir / 'config.json'
+
+    if config_json_path.exists():
+        print(f"  Loading config from {config_json_path}...")
+        import json
+        with open(config_json_path, 'r') as f:
+            file_config = json.load(f)
+            # Merge configs, preferring file config for model architecture params
+            for key in ['atom_embed_dim', 'residue_embed_dim', 'hidden_irreps',
+                       'output_dim', 'num_layers', 'use_multi_hop', 'use_nonbonded',
+                       'pooling_type', 'use_layer_norm', 'dropout']:
+                if key in file_config:
+                    config[key] = file_config[key]
+
     model_version = config.get('model_version', 'v2')
 
     print(f"  Model version: {model_version}")
@@ -63,13 +80,16 @@ def load_model_from_checkpoint(checkpoint_path, device='cpu'):
         model = RNAPocketEncoderV2(
             num_atom_types=encoder.num_atom_types,
             num_residues=encoder.num_residues,
-            atom_embed_dim=config.get('atom_embed_dim', 64),
-            residue_embed_dim=config.get('residue_embed_dim', 32),
+            atom_embed_dim=config.get('atom_embed_dim', 32),
+            residue_embed_dim=config.get('residue_embed_dim', 16),
             hidden_irreps=config.get('hidden_irreps', '32x0e + 16x1o + 8x2e'),
-            num_layers=config.get('num_layers', 3),
+            output_dim=config.get('output_dim', 512),
+            num_layers=config.get('num_layers', 4),
             use_multi_hop=config.get('use_multi_hop', True),
             use_nonbonded=config.get('use_nonbonded', True),
-            pooling_type=config.get('pooling_type', 'attention')
+            use_layer_norm=config.get('use_layer_norm', False),
+            pooling_type=config.get('pooling_type', 'attention'),
+            dropout=config.get('dropout', 0.0)
         )
     else:
         raise ValueError(f"Model version '{model_version}' is no longer supported. "
