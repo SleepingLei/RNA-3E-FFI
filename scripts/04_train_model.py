@@ -287,7 +287,7 @@ def main():
                         help="Hidden layer irreps")
     parser.add_argument("--output_dim", type=int, default=1536,
                         help="Output embedding dimension")
-    parser.add_argument("--num_layers", type=int, default=6,
+    parser.add_argument("--num_layers", type=int, default=4,
                         help="Number of message passing layers")
     parser.add_argument("--num_radial_basis", type=int, default=8,
                         help="Number of radial basis functions")
@@ -342,7 +342,7 @@ def main():
     # Output arguments
     parser.add_argument("--output_dir", type=str, default="models/checkpoints_v2_normalized",
                         help="Output directory for checkpoints")
-    parser.add_argument("--save_every", type=int, default=10,
+    parser.add_argument("--save_every", type=int, default=3,
                         help="Save checkpoint every N epochs")
 
     # Resume training arguments

@@ -46,7 +46,7 @@ def load_model_from_checkpoint(checkpoint_path, device='cpu'):
 
     # Get model config from checkpoint
     config = checkpoint.get('config', {})
-    model_version = config.get('model_version', 'v1')
+    model_version = config.get('model_version', 'v2')
 
     print(f"  Model version: {model_version}")
     print(f"  Training epoch: {checkpoint.get('epoch', 'unknown')}")
@@ -477,7 +477,7 @@ def main():
     # Optional arguments
     parser.add_argument("--output", type=str, default=None,
                         help="Output JSON file for results")
-    parser.add_argument("--metric", type=str, default="cosine",
+    parser.add_argument("--metric", type=str, default="euclidean",
                         choices=['cosine', 'euclidean'],
                         help="Distance metric for retrieval")
     parser.add_argument("--top_percentages", type=int, nargs='+', default=[5, 10, 20],

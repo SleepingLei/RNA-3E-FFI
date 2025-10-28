@@ -7,7 +7,7 @@
   "residue_embed_dim": 16,
   "hidden_irreps": "32x0e + 16x1o + 8x2e",
   "output_dim": 1536,
-  "num_layers": 6,
+  "num_layers": 4,
   "num_radial_basis": 8,
   "use_multi_hop": true,
   "use_nonbonded": true,
@@ -23,13 +23,13 @@
   "optimizer": "adam",
   "scheduler": "plateau",
   "patience": 30,
-  "num_workers": 4,
+  "num_workers": 2,
   "grad_clip": 1.0,
   "train_ratio": 0.8,
   "val_ratio": 0.1,
   "seed": 42,
   "output_dir": "models/checkpoints_v2_normalized",
-  "save_every": 10,
+  "save_every": 3,
   "resume": true,
-  "checkpoint": "models/checkpoints_v2_normalized/best_model.pt"
+  "checkpoint": "models/checkpoints_v2_normalized/checkpoint_epoch_114.pt"
 }
