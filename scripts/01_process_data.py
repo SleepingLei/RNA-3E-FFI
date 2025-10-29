@@ -228,9 +228,12 @@ def clean_rna_terminal_atoms(input_pdb: Path, output_pdb: Path) -> bool:
     tleap will add them back with correct types
 
     Strategy:
-    - Remove 5' phosphate groups (P, OP1, OP2, O5') from first residue
-    - Remove 3' hydroxyl (O3') from last residue
+    - Remove 5' phosphate groups (P, OP1, OP2, O5') from first residue OF EACH CHAIN
+    - Remove 3' hydroxyl (O3') from last residue OF EACH CHAIN
     - Let tleap handle terminal capping
+
+    IMPORTANT: RNA pockets may contain multiple discontinuous chains.
+    We need to clean terminals for EACH chain, not just the first/last residue overall.
     """
     print(f"  Cleaning terminal atoms...")
 
@@ -241,28 +244,49 @@ def clean_rna_terminal_atoms(input_pdb: Path, output_pdb: Path) -> bool:
             print(f"    ⚠️  No residues found")
             return False
 
-        # Get first and last RNA residues
-        first_residue = u.residues[0]
-        last_residue = u.residues[-1]
+        # Group residues by chain/segment ID
+        chains = {}
+        for residue in u.residues:
+            chain_id = residue.segid if residue.segid else 'X'
+            if chain_id not in chains:
+                chains[chain_id] = []
+            chains[chain_id].append(residue)
+
+        print(f"    Found {len(chains)} chain(s): {list(chains.keys())}")
 
         # Atoms to remove
         atoms_to_remove = []
+        total_removed_5prime = 0
+        total_removed_3prime = 0
 
-        # 5' terminal: remove phosphate group
+        # For each chain, clean 5' and 3' terminals
         atoms_to_remove_5prime = {'P', 'OP1', 'OP2', 'O5P', 'O1P', 'O2P'}
-        removed_5prime = []
-        for atom in first_residue.atoms:
-            if atom.name in atoms_to_remove_5prime:
-                atoms_to_remove.append(atom)
-                removed_5prime.append(atom.name)
-
-        # 3' terminal: remove O3'
         atoms_to_remove_3prime = {"O3'", "O3*"}
-        removed_3prime = []
-        for atom in last_residue.atoms:
-            if atom.name in atoms_to_remove_3prime:
-                atoms_to_remove.append(atom)
-                removed_3prime.append(atom.name)
+
+        for chain_id, residues in chains.items():
+            if len(residues) == 0:
+                continue
+
+            # Clean 5' terminal (first residue of this chain)
+            first_residue = residues[0]
+            removed_5prime = []
+            for atom in first_residue.atoms:
+                if atom.name in atoms_to_remove_5prime:
+                    atoms_to_remove.append(atom)
+                    removed_5prime.append(atom.name)
+            total_removed_5prime += len(removed_5prime)
+
+            # Clean 3' terminal (last residue of this chain)
+            last_residue = residues[-1]
+            removed_3prime = []
+            for atom in last_residue.atoms:
+                if atom.name in atoms_to_remove_3prime:
+                    atoms_to_remove.append(atom)
+                    removed_3prime.append(atom.name)
+            total_removed_3prime += len(removed_3prime)
+
+            if removed_5prime or removed_3prime:
+                print(f"      Chain {chain_id}: removed {len(removed_5prime)} 5'-terminal, {len(removed_3prime)} 3'-terminal atoms")
 
         # Create new AtomGroup without these atoms
         if atoms_to_remove:
@@ -271,7 +295,7 @@ def clean_rna_terminal_atoms(input_pdb: Path, output_pdb: Path) -> bool:
 
             # Save cleaned PDB
             keep_atoms.write(str(output_pdb))
-            print(f"    ✓ Removed {len(atoms_to_remove)} terminal atoms ({len(removed_5prime)} from 5', {len(removed_3prime)} from 3')")
+            print(f"    ✓ Removed {len(atoms_to_remove)} terminal atoms total ({total_removed_5prime} from 5', {total_removed_3prime} from 3')")
             return True
         else:
             print(f"    No terminal atoms to remove, copying original")
