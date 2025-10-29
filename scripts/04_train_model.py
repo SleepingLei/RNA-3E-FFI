@@ -193,11 +193,14 @@ def train_epoch(model, loader, optimizer, device):
         num_batches += 1
 
         # Explicitly delete to free memory
-        del pocket_embedding, target_embedding, loss
+        del pocket_embedding, target_embedding, loss, batch
 
-        # Periodic cache clearing (every 10 batches to reduce overhead)
-        if device.type == 'cuda' and (batch_idx + 1) % 10 == 0:
+        # More aggressive cache clearing to prevent fragmentation
+        if device.type == 'cuda' and (batch_idx + 1) % 5 == 0:
             torch.cuda.empty_cache()
+            # Also sync to ensure operations complete
+            if (batch_idx + 1) % 20 == 0:
+                torch.cuda.synchronize()
 
     # Get learnable weights if available
     metrics = {'loss': total_loss / num_batches}
@@ -252,10 +255,10 @@ def evaluate(model, loader, device):
             num_batches += 1
 
             # Explicitly delete to free memory
-            del pocket_embedding, target_embedding, mse_loss, l1_loss
+            del pocket_embedding, target_embedding, mse_loss, l1_loss, batch
 
-            # Periodic cache clearing
-            if device.type == 'cuda' and (batch_idx + 1) % 10 == 0:
+            # More aggressive cache clearing during validation
+            if device.type == 'cuda' and (batch_idx + 1) % 5 == 0:
                 torch.cuda.empty_cache()
 
     return {
@@ -677,6 +680,9 @@ def main():
                 'val_loss': val_loss,
             }, checkpoint_path)
             print(f"Saved checkpoint to {checkpoint_path}")
+            # Clear cache after saving to free up temporary memory
+            if device.type == 'cuda':
+                torch.cuda.empty_cache()
 
         # Save best model
         if val_loss < best_val_loss:
@@ -692,6 +698,9 @@ def main():
                 'val_loss': val_loss,
             }, best_model_path)
             print(f"New best model! Saved to {best_model_path}")
+            # Clear cache after saving
+            if device.type == 'cuda':
+                torch.cuda.empty_cache()
         else:
             patience_counter += 1
 
@@ -700,9 +709,14 @@ def main():
             print(f"\nEarly stopping triggered after {epoch} epochs")
             break
 
-        # Clear cache at end of epoch
+        # Aggressive memory cleanup at end of epoch to prevent fragmentation
         if device.type == 'cuda':
+            # Force synchronization to complete all pending operations
+            torch.cuda.synchronize()
+            # Clear cache
             torch.cuda.empty_cache()
+            # Reset peak memory stats for monitoring
+            torch.cuda.reset_peak_memory_stats()
 
         print()
 
