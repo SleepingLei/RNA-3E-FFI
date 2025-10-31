@@ -159,7 +159,7 @@ def inspect_graph(graph_path):
 
 def main():
     parser = argparse.ArgumentParser(description="Inspect PyTorch Geometric graph files")
-    parser.add_argument("graph_file", type=str, help="Path to the .pt graph file")
+    parser.add_argument("--graph_file", type=str, help="Path to the .pt graph file")
     parser.add_argument("--verbose", "-v", action="store_true", help="Show more details")
 
     args = parser.parse_args()

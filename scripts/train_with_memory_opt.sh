@@ -19,21 +19,17 @@ echo ""
 
 # Run training with optimized settings
 python scripts/04_train_model.py \
-    --hariboss_csv hariboss/Complexes.csv \
-    --graph_dir data/processed/graphs \
-    --embeddings_path data/processed/ligand_embeddings.h5 \
-    --splits_file data/splits/splits.json \
     --output_dim 1536 \
-    --num_layers 4 \
-    --batch_size $BATCH_SIZE \
+    --batch_size 1 \
     --num_epochs 300 \
     --lr 0.001 \
-    --num_workers 2 \
+    --num_workers 1 \
     --use_multi_hop \
     --use_nonbonded \
     --use_gate \
-    --use_layer_norm \
-    --save_every 3
-
+    --save_every 5 \
+    --num_layers 8 --use_layer_norm --dropout 0.1 \
+    --output_dir models/checkpoints_v2_normalized_1536_8_dropout_0.1 \
+    #--resume --checkpoint models/checkpoints_v2_normalized_1536_8_dropout_0.1/best_model.pt
 echo ""
 echo "Training completed!"

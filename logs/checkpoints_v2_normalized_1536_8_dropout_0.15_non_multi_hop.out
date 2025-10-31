@@ -1,0 +1,94 @@
+nohup: ignoring input
+==========================================
+Training with Memory Optimization
+==========================================
+PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True,max_split_size_mb:128
+Batch size: 2
+
+/personal/RNA-3E-FFI/scripts/04_train_model.py:91: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  data = torch.load(graph_path)
+/opt/mamba/envs/RNA/lib/python3.11/site-packages/torch/optim/lr_scheduler.py:62: UserWarning: The verbose parameter is deprecated. Please use get_last_lr() to access the learning rate.
+  warnings.warn(
+Using device: cuda
+Loading splits from data/splits/splits.json
+Dataset splits: Train=974, Val=121, Test=123
+Dataset initialized with 974 valid complexes
+Dataset initialized with 121 valid complexes
+
+Initializing v2.0 model...
+Using RNAPocketEncoderV2 (standard)
+Vocabulary sizes: 70 atom types, 43 residues
+Model has 5,380,372 parameters
+
+Model configuration:
+  Multi-hop: True
+  Non-bonded: True
+  Pooling: attention
+  Initial angle weight: 0.333
+  Initial dihedral weight: 0.333
+  Initial nonbonded weight: 0.333
+
+Starting training from scratch...
+
+
+Starting training...
+
+Epoch 1/300
+------------------------------------------------------------
+Training:   0%|          | 0/974 [00:00<?, ?it/s]/personal/RNA-3E-FFI/scripts/04_train_model.py:144: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  data.y = torch.tensor(ligand_embedding, dtype=torch.float32)
+Training:   0%|          | 1/974 [00:04<1:05:24,  4.03s/it]Training:   0%|          | 2/974 [00:05<43:50,  2.71s/it]  Training:   0%|          | 3/974 [00:13<1:23:46,  5.18s/it]Training:   0%|          | 4/974 [00:21<1:40:27,  6.21s/it]Training:   1%|          | 5/974 [00:29<1:51:28,  6.90s/it]Training:   1%|          | 6/974 [00:30<1:16:28,  4.74s/it]Training:   1%|          | 7/974 [00:30<54:16,  3.37s/it]  Training:   1%|          | 8/974 [00:31<39:47,  2.47s/it]Training:   1%|          | 9/974 [00:32<30:07,  1.87s/it]Training:   1%|          | 10/974 [00:32<23:57,  1.49s/it]Training:   1%|          | 11/974 [00:33<19:19,  1.20s/it]Training:   1%|          | 12/974 [00:33<16:05,  1.00s/it]Training:   1%|▏         | 13/974 [00:34<13:53,  1.15it/s]Training:   1%|▏         | 14/974 [00:34<12:22,  1.29it/s]Training:   2%|▏         | 15/974 [00:35<12:06,  1.32it/s]Training:   2%|▏         | 16/974 [00:36<11:08,  1.43it/s]Training:   2%|▏         | 17/974 [00:36<10:27,  1.53it/s]Training:   2%|▏         | 18/974 [00:37<09:55,  1.61it/s]Training:   2%|▏         | 19/974 [00:37<09:33,  1.66it/s]Training:   2%|▏         | 20/974 [00:38<09:39,  1.65it/s]Training:   2%|▏         | 21/974 [00:39<09:23,  1.69it/s]Training:   2%|▏         | 22/974 [00:39<09:12,  1.72it/s]Training:   2%|▏         | 23/974 [00:40<09:04,  1.75it/s]Training:   2%|▏         | 24/974 [00:40<08:56,  1.77it/s]Training:   3%|▎         | 25/974 [00:41<09:25,  1.68it/s]Training:   3%|▎         | 26/974 [00:41<09:12,  1.72it/s]Training:   3%|▎         | 27/974 [00:42<09:01,  1.75it/s]Training:   3%|▎         | 28/974 [00:42<08:53,  1.77it/s]Training:   3%|▎         | 29/974 [00:43<08:50,  1.78it/s]Training:   3%|▎         | 30/974 [00:44<09:26,  1.67it/s]Training:   3%|▎         | 31/974 [00:44<09:15,  1.70it/s]Training:   3%|▎         | 32/974 [00:45<09:04,  1.73it/s]Training:   3%|▎         | 32/974 [00:45<22:33,  1.44s/it]
+Traceback (most recent call last):
+  File "/personal/RNA-3E-FFI/scripts/04_train_model.py", line 757, in <module>
+    main()
+  File "/personal/RNA-3E-FFI/scripts/04_train_model.py", line 640, in main
+    train_metrics = train_epoch(model, train_loader, optimizer, device)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/personal/RNA-3E-FFI/scripts/04_train_model.py", line 170, in train_epoch
+    pocket_embedding = model(batch)
+                       ^^^^^^^^^^^^
+  File "/opt/mamba/envs/RNA/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1736, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/mamba/envs/RNA/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1747, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/personal/RNA-3E-FFI/models/e3_gnn_encoder_v2.py", line 805, in forward
+    h_nonbonded = self.nonbonded_mp_layers[i](
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/mamba/envs/RNA/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1736, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/mamba/envs/RNA/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1747, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/personal/RNA-3E-FFI/models/e3_gnn_encoder_v2.py", line 346, in forward
+    x_message = self.propagate(edge_index, x=x, pos=pos, edge_attr=edge_attr)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/tmp/models.e3_gnn_encoder_v2_E3GNNMessagePassingLayer_propagate_zexg_2yc.py", line 228, in propagate
+    out = self.message(
+          ^^^^^^^^^^^^^
+  File "/personal/RNA-3E-FFI/models/e3_gnn_encoder_v2.py", line 414, in message
+    tp_weights = self.radial_mlp(radial_input)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/mamba/envs/RNA/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1736, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/mamba/envs/RNA/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1747, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/mamba/envs/RNA/lib/python3.11/site-packages/torch/nn/modules/container.py", line 250, in forward
+    input = module(input)
+            ^^^^^^^^^^^^^
+  File "/opt/mamba/envs/RNA/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1736, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/mamba/envs/RNA/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1747, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/mamba/envs/RNA/lib/python3.11/site-packages/torch/nn/modules/linear.py", line 125, in forward
+    return F.linear(input, self.weight, self.bias)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 3.08 GiB. GPU 0 has a total capacity of 31.74 GiB of which 2.97 GiB is free. Process 10803 has 28.77 GiB memory in use. Of the allocated memory 28.12 GiB is allocated by PyTorch, and 276.50 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+
+Training completed!
