@@ -25,13 +25,18 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 
 
-def check_normalization(embeddings_path, embedding_name=""):
+def check_normalization(embeddings_path, embedding_name="", max_samples=None):
     """
-    Check if embeddings are properly normalized.
+    Check if embeddings are properly normalized (z-score normalization).
+
+    For z-score normalization, each dimension should have:
+    - Mean ≈ 0 (across all samples)
+    - Std ≈ 1 (across all samples)
 
     Args:
         embeddings_path: Path to HDF5 file
         embedding_name: Name for display
+        max_samples: Maximum number of samples to load (None = all)
 
     Returns:
         dict with normalization statistics
@@ -42,46 +47,62 @@ def check_normalization(embeddings_path, embedding_name=""):
 
     all_embeddings = []
     with h5py.File(embeddings_path, 'r') as f:
-        print(f"Loading {len(f.keys())} embeddings...")
-        for key in tqdm(list(f.keys())[:100], desc="Loading"):  # Sample 100 for speed
+        keys = list(f.keys())
+        if max_samples:
+            keys = keys[:max_samples]
+        print(f"Loading {len(keys)}/{len(f.keys())} embeddings...")
+        for key in tqdm(keys, desc="Loading"):
             all_embeddings.append(f[key][:])
 
     all_embeddings = np.array(all_embeddings)
+    print(f"Loaded shape: {all_embeddings.shape}")
 
-    # Global statistics
+    # Per-dimension statistics (the key metric for z-score normalization)
+    dim_means = all_embeddings.mean(axis=0)  # Mean of each dimension across samples
+    dim_stds = all_embeddings.std(axis=0, ddof=0)   # Std of each dimension across samples
+
+    print(f"\n📊 Z-score Normalization Check (per-dimension):")
+    print(f"  Expected: Each dimension has mean≈0, std≈1 (across samples)")
+    print(f"\n  Dimension Means:")
+    print(f"    Average: {dim_means.mean():.6f}")
+    print(f"    Std dev: {dim_means.std():.6f}")
+    print(f"    Range: [{dim_means.min():.6f}, {dim_means.max():.6f}]")
+    print(f"    Dims with |mean| > 0.1: {(np.abs(dim_means) > 0.1).sum()}/{len(dim_means)}")
+
+    print(f"\n  Dimension Stds:")
+    print(f"    Average: {dim_stds.mean():.6f}")
+    print(f"    Std dev: {dim_stds.std():.6f}")
+    print(f"    Range: [{dim_stds.min():.6f}, {dim_stds.max():.6f}]")
+    print(f"    Dims with |std-1| > 0.2: {(np.abs(dim_stds - 1.0) > 0.2).sum()}/{len(dim_stds)}")
+
+    # Global statistics (for reference)
     global_mean = all_embeddings.mean()
     global_std = all_embeddings.std()
-
-    # Per-dimension statistics
-    dim_means = all_embeddings.mean(axis=0)
-    dim_stds = all_embeddings.std(axis=0)
+    print(f"\n  Global Statistics (for reference):")
+    print(f"    Mean: {global_mean:.6f}")
+    print(f"    Std: {global_std:.6f}")
 
     # Per-sample statistics
     sample_means = all_embeddings.mean(axis=1)
     sample_stds = all_embeddings.std(axis=1)
+    print(f"\n  Per-Sample Statistics:")
+    print(f"    Mean range: [{sample_means.min():.4f}, {sample_means.max():.4f}]")
+    print(f"    Std range: [{sample_stds.min():.4f}, {sample_stds.max():.4f}]")
 
-    print(f"\nGlobal Statistics:")
-    print(f"  Mean: {global_mean:.6f}")
-    print(f"  Std: {global_std:.6f}")
-
-    print(f"\nPer-Dimension Statistics:")
-    print(f"  Mean of means: {dim_means.mean():.6f} (±{dim_means.std():.6f})")
-    print(f"  Mean of stds: {dim_stds.mean():.6f} (±{dim_stds.std():.6f})")
-    print(f"  Dimensions with mean > 0.1: {(np.abs(dim_means) > 0.1).sum()}/{len(dim_means)}")
-    print(f"  Dimensions with std far from 1: {(np.abs(dim_stds - 1.0) > 0.2).sum()}/{len(dim_stds)}")
-
-    print(f"\nPer-Sample Statistics:")
-    print(f"  Mean range: [{sample_means.min():.4f}, {sample_means.max():.4f}]")
-    print(f"  Std range: [{sample_stds.min():.4f}, {sample_stds.max():.4f}]")
-
-    # Normalization verdict
-    is_normalized = (abs(dim_means.mean()) < 0.01 and
-                     abs(dim_stds.mean() - 1.0) < 0.1)
+    # Normalization verdict based on per-dimension statistics
+    mean_check = np.abs(dim_means).max() < 0.15  # Max abs mean < 0.15
+    std_check = np.abs(dim_stds - 1.0).max() < 0.3  # Max |std-1| < 0.3
+    is_normalized = mean_check and std_check
 
     if is_normalized:
-        print(f"\n✅ Embeddings appear to be properly normalized (z-score)")
+        print(f"\n✅ Embeddings are properly normalized (z-score)")
+        print(f"   All dimensions have |mean| < 0.15 and |std-1| < 0.3")
     else:
-        print(f"\n⚠️  Embeddings may NOT be normalized properly")
+        print(f"\n⚠️  Embeddings may NOT be properly normalized")
+        if not mean_check:
+            print(f"   Issue: Some dimensions have large mean (max |mean| = {np.abs(dim_means).max():.4f})")
+        if not std_check:
+            print(f"   Issue: Some dimensions have std far from 1 (max |std-1| = {np.abs(dim_stds - 1.0).max():.4f})")
 
     return {
         'is_normalized': is_normalized,
@@ -94,14 +115,19 @@ def check_normalization(embeddings_path, embedding_name=""):
     }
 
 
-def check_reconstruction_error(original_path, reduced_path, pca_model_path, num_samples=50):
+def check_reconstruction_error(original_path, reduced_path, pca_model_path,
+                              norm_params_256d_path=None, num_samples=50):
     """
     Check PCA reconstruction error.
+
+    IMPORTANT: If the reduced embeddings are re-normalized, must provide norm_params_256d_path
+    to de-normalize them before reconstruction.
 
     Args:
         original_path: Path to original embeddings
         reduced_path: Path to reduced embeddings
         pca_model_path: Path to PCA model
+        norm_params_256d_path: Path to 256d normalization params (if re-normalized)
         num_samples: Number of samples to check
 
     Returns:
@@ -118,6 +144,16 @@ def check_reconstruction_error(original_path, reduced_path, pca_model_path, num_
     print(f"PCA model: {pca.n_components} components, {pca.n_features_in_} features")
     print(f"Explained variance: {pca.explained_variance_ratio_.sum()*100:.2f}%")
 
+    # Load 256d normalization params if provided
+    norm_params_256d = None
+    if norm_params_256d_path and Path(norm_params_256d_path).exists():
+        norm_params_256d = np.load(norm_params_256d_path)
+        print(f"Loaded 256d normalization params: {norm_params_256d_path}")
+        print(f"  Will de-normalize before reconstruction")
+    else:
+        print(f"⚠️  No 256d normalization params provided")
+        print(f"  Assuming reduced embeddings are NOT re-normalized")
+
     # Sample keys
     with h5py.File(original_path, 'r') as f:
         keys = list(f.keys())[:num_samples]
@@ -132,6 +168,10 @@ def check_reconstruction_error(original_path, reduced_path, pca_model_path, num_
         for key in tqdm(keys, desc="Computing errors"):
             original = f_orig[key][:]
             reduced = f_red[key][:]
+
+            # De-normalize 256d if needed
+            if norm_params_256d is not None:
+                reduced = reduced * norm_params_256d['std'] + norm_params_256d['mean']
 
             # Reconstruct
             reconstructed = pca.inverse_transform(reduced.reshape(1, -1))
@@ -346,6 +386,13 @@ def main():
         help="Directory to save verification plots"
     )
 
+    parser.add_argument(
+        "--max_samples_for_norm_check",
+        type=int,
+        default=None,
+        help="Max samples to load for normalization check (None = all). Default: all samples"
+    )
+
     args = parser.parse_args()
 
     # Create output directory
@@ -360,19 +407,24 @@ def main():
     print(f"  Reduced: {args.reduced}")
     print(f"  PCA model: {args.pca_model}")
     print(f"  Norm params (256d): {args.norm_params_256d}")
+    print(f"\nSettings:")
+    print(f"  Num samples for reconstruction/similarity: {args.num_samples}")
+    print(f"  Max samples for normalization check: {'All' if args.max_samples_for_norm_check is None else args.max_samples_for_norm_check}")
 
     results = {}
 
     # Check 1: Original embeddings normalization
     results['original_norm'] = check_normalization(
         args.original,
-        embedding_name="Original (1536d)"
+        embedding_name="Original (1536d)",
+        max_samples=args.max_samples_for_norm_check
     )
 
     # Check 2: Reduced embeddings normalization
     results['reduced_norm'] = check_normalization(
         args.reduced,
-        embedding_name="Reduced (256d)"
+        embedding_name="Reduced (256d)",
+        max_samples=args.max_samples_for_norm_check
     )
 
     # Check 3: Reconstruction error
@@ -380,6 +432,7 @@ def main():
         args.original,
         args.reduced,
         args.pca_model,
+        norm_params_256d_path=args.norm_params_256d,
         num_samples=args.num_samples
     )
 
