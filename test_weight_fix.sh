@@ -50,12 +50,14 @@ print(f'nonbonded_weight: {model.get_nonbonded_weight().item():.6f}')
 print('\n测试梯度计算...')
 optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
 
-# 创建假数据
-x = torch.randn(10, model.get_angle_weight().item())  # 使用权重值测试
-loss = x.mean()
+# 创建简单的loss来测试梯度
+weight = model.get_angle_weight()
+loss = weight * 10.0  # 简单的乘法，确保有梯度
+optimizer.zero_grad()
 loss.backward()
 
-print(f'angle_weight_raw.grad: {model.angle_weight_raw.grad}')
+grad_val = model.angle_weight_raw.grad.item() if model.angle_weight_raw.grad is not None else None
+print(f'angle_weight_raw.grad: {grad_val}')
 
 if model.angle_weight_raw.grad is None:
     print('⚠️  angle_weight_raw没有梯度')
