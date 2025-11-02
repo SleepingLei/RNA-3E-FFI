@@ -244,7 +244,8 @@ def compute_loss(pred, target, loss_fn='cosine', cosine_weight=0.7, mse_weight=0
 
 
 def train_epoch(model, loader, optimizer, device, loss_fn='cosine',
-                cosine_weight=0.7, mse_weight=0.3, temperature=0.07):
+                cosine_weight=0.7, mse_weight=0.3, temperature=0.07,
+                grad_clip=0.0, monitor_gradients=False):
     """
     Train for one epoch.
 
@@ -292,8 +293,31 @@ def train_epoch(model, loader, optimizer, device, loss_fn='cosine',
         optimizer.zero_grad()
         loss.backward()
 
+        # Compute gradient norm before clipping (for monitoring)
+        if monitor_gradients and batch_idx % 50 == 0:
+            total_grad_norm = 0
+            for p in model.parameters():
+                if p.grad is not None:
+                    total_grad_norm += p.grad.norm().item() ** 2
+            total_grad_norm = total_grad_norm ** 0.5
+            print(f"  Batch {batch_idx}: Grad norm before clip = {total_grad_norm:.6f}")
+
         # Optional: Gradient clipping for stability
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        # Note: For cosine loss, gradients are naturally smaller than MSE
+        if grad_clip > 0:
+            # Use user-specified clipping value
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=grad_clip)
+        else:
+            # Use automatic defaults based on loss function
+            if loss_fn == 'infonce':
+                # InfoNCE can have larger gradients due to softmax
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
+            elif loss_fn == 'cosine':
+                # Cosine loss has smaller gradients, use higher threshold
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)
+            else:
+                # MSE and combined losses
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
 
         optimizer.step()
 
@@ -475,8 +499,10 @@ def main():
                         help="Early stopping patience")
     parser.add_argument("--num_workers", type=int, default=1,
                         help="Number of data loader workers")
-    parser.add_argument("--grad_clip", type=float, default=1.0,
-                        help="Gradient clipping max norm (0 to disable)")
+    parser.add_argument("--grad_clip", type=float, default=0.0,
+                        help="Gradient clipping max norm (0 to use automatic per-loss defaults)")
+    parser.add_argument("--monitor_gradients", action="store_true", default=False,
+                        help="Print gradient statistics during training for debugging")
 
     # Splitting arguments
     parser.add_argument("--train_ratio", type=float, default=0.8,
@@ -785,6 +811,27 @@ def main():
         print(f"  ⚠️  Note: InfoNCE requires batch_size >= 16 for effective negative sampling")
         if args.batch_size < 16:
             print(f"  ⚠️  Warning: Current batch_size={args.batch_size} may be too small for InfoNCE")
+
+    # Print gradient clipping configuration
+    if args.grad_clip > 0:
+        print(f"\nGradient Clipping: {args.grad_clip} (manual)")
+    else:
+        # Show automatic defaults
+        if args.loss_fn == 'cosine':
+            print(f"\nGradient Clipping: 10.0 (auto for cosine loss)")
+        elif args.loss_fn == 'infonce':
+            print(f"\nGradient Clipping: 5.0 (auto for InfoNCE)")
+        else:
+            print(f"\nGradient Clipping: 5.0 (auto for {args.loss_fn})")
+
+    if args.monitor_gradients:
+        print("Gradient Monitoring: ENABLED (will print every 50 batches)")
+
+    # Batch size warning for cosine loss
+    if args.loss_fn == 'cosine' and args.batch_size < 4:
+        print(f"\n⚠️  Warning: batch_size={args.batch_size} is very small for cosine loss")
+        print("   Consider using batch_size >= 8 for more stable training")
+
     print("="*60)
 
     print("\nStarting training...\n")
@@ -803,7 +850,9 @@ def main():
             loss_fn=args.loss_fn,
             cosine_weight=args.cosine_weight,
             mse_weight=args.mse_weight,
-            temperature=args.temperature
+            temperature=args.temperature,
+            grad_clip=args.grad_clip,
+            monitor_gradients=args.monitor_gradients
         )
         train_loss = train_metrics['loss']
 
