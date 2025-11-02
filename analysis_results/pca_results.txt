@@ -1,0 +1,17 @@
+PCA Analysis Results
+================================================================================
+
+Original dimension: 1536
+Number of samples: 917
+
+Variance explained by dimensions:
+  50%: 2 dims
+  70%: 3 dims
+  80%: 5 dims
+  90%: 10 dims
+  95%: 20 dims
+  99%: 81 dims
+
+Effective rank: 37.4
+
+Recommended dimension: 256

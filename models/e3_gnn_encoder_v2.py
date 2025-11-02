@@ -729,10 +729,21 @@ class RNAPocketEncoderV2(nn.Module):
         scalar_irreps = o3.Irreps([(mul, ir) for mul, ir in self.hidden_irreps if ir.l == 0])
         self.scalar_dim = scalar_irreps.dim
 
-        # Pooling
+        # Calculate invariant representation dimension
+        # invariant_dim = scalar_dim + number of l=1 irreps + number of l=2 irreps
+        # For "32x0e + 16x1o + 8x2e": invariant_dim = 32 + 16 + 8 = 56
+        # We take L2 norm of each vector (l=1) and tensor (l=2) to get scalar invariants
+        self.num_l1_irreps = sum(mul for mul, ir in self.hidden_irreps if ir.l == 1)
+        self.num_l2_irreps = sum(mul for mul, ir in self.hidden_irreps if ir.l == 2)
+        self.invariant_dim = self.scalar_dim + self.num_l1_irreps + self.num_l2_irreps
+
+        # Build index ranges for each irrep type
+        self._build_irreps_slices()
+
+        # Pooling (uses invariant representation)
         if pooling_type == 'attention':
             self.pooling_mlp = nn.Sequential(
-                nn.Linear(self.scalar_dim, pooling_hidden_dim),
+                nn.Linear(self.invariant_dim, pooling_hidden_dim),
                 nn.SiLU(),
                 nn.Dropout(dropout) if dropout > 0 else nn.Identity(),
                 nn.Linear(pooling_hidden_dim, pooling_hidden_dim),
@@ -743,11 +754,84 @@ class RNAPocketEncoderV2(nn.Module):
         else:
             self.pooling_mlp = None
 
-        # Output projection
+        # Output projection (uses invariant representation)
         self.output_projection = nn.Sequential(
-            nn.Linear(self.scalar_dim, output_dim),
+            nn.Linear(self.invariant_dim, output_dim),
             nn.LayerNorm(output_dim)
         )
+
+    def _build_irreps_slices(self):
+        """
+        Build index slices for extracting different irrep types.
+        This is used to efficiently extract scalars, vectors, and tensors.
+        """
+        self.irreps_slices = {'l0': [], 'l1': [], 'l2': []}
+
+        idx = 0
+        for mul, ir in self.hidden_irreps:
+            dim = ir.dim
+            for _ in range(mul):
+                if ir.l == 0:
+                    self.irreps_slices['l0'].append((idx, idx + dim))
+                elif ir.l == 1:
+                    self.irreps_slices['l1'].append((idx, idx + dim))
+                elif ir.l == 2:
+                    self.irreps_slices['l2'].append((idx, idx + dim))
+                idx += dim
+
+    def extract_invariant_features(self, h):
+        """
+        Extract E(3) invariant features from equivariant representations.
+
+        Since molecular fingerprints and Uni-Mol embeddings are E3 invariant,
+        we need to extract invariant features from the equivariant representations.
+
+        Strategy:
+        1. Extract scalar features (l=0, even) directly - these are already invariant
+        2. Compute L2 norm of each vector (l=1, odd) - gives rotation invariant magnitude
+        3. Compute L2 norm of each 2nd-order tensor (l=2, even) - gives rotation invariant magnitude
+        4. Concatenate all invariant features
+
+        Args:
+            h: Equivariant features [num_atoms, hidden_irreps_dim]
+
+        Returns:
+            t: Invariant features [num_atoms, invariant_dim]
+               invariant_dim = num_scalars + num_l1_irreps + num_l2_irreps
+
+        Example:
+            For "32x0e + 16x1o + 8x2e":
+            - 32 scalars (l=0): used directly → 32 features
+            - 16 vectors (l=1): each 3D vector → 1 scalar (L2 norm) → 16 features
+            - 8 tensors (l=2): each 5D tensor → 1 scalar (L2 norm) → 8 features
+            - Total invariant_dim = 32 + 16 + 8 = 56
+        """
+        device = h.device
+        num_atoms = h.shape[0]
+
+        # Collect invariant features
+        invariant_features = []
+
+        # 1. Extract scalars (l=0) - already invariant
+        for start, end in self.irreps_slices['l0']:
+            invariant_features.append(h[:, start:end])
+
+        # 2. L2 norm of vectors (l=1)
+        for start, end in self.irreps_slices['l1']:
+            vec = h[:, start:end]  # [num_atoms, 3]
+            norm = torch.linalg.norm(vec, dim=-1, keepdim=True)  # [num_atoms, 1]
+            invariant_features.append(norm)
+
+        # 3. L2 norm of 2nd-order tensors (l=2)
+        for start, end in self.irreps_slices['l2']:
+            tensor = h[:, start:end]  # [num_atoms, 5]
+            norm = torch.linalg.norm(tensor, dim=-1, keepdim=True)  # [num_atoms, 1]
+            invariant_features.append(norm)
+
+        # Concatenate all invariant features
+        t = torch.cat(invariant_features, dim=-1)  # [num_atoms, invariant_dim]
+
+        return t
 
     def forward(self, data):
         """
@@ -826,14 +910,16 @@ class RNAPocketEncoderV2(nn.Module):
                 )
                 h = h_dropped
 
-        # Extract scalar features
-        h_scalar = h[:, :self.scalar_dim]
+        # Extract invariant features (scalars + L2 norms of higher-order tensors)
+        # This is crucial for compatibility with E3-invariant ligand representations
+        # (molecular fingerprints, Uni-Mol embeddings)
+        t = self.extract_invariant_features(h)
 
         # Pooling
         if self.pooling_type == 'attention' and self.pooling_mlp is not None:
-            attention_logits = self.pooling_mlp(h_scalar)
+            attention_logits = self.pooling_mlp(t)
             attention_weights = softmax(attention_logits, index=batch, dim=0)
-            weighted_features = h_scalar * attention_weights
+            weighted_features = t * attention_weights
             graph_embedding = scatter(
                 weighted_features,
                 index=batch,
@@ -841,14 +927,14 @@ class RNAPocketEncoderV2(nn.Module):
                 reduce='sum'
             )
         elif self.pooling_type == 'mean':
-            graph_embedding = scatter(h_scalar, index=batch, dim=0, reduce='mean')
+            graph_embedding = scatter(t, index=batch, dim=0, reduce='mean')
         elif self.pooling_type == 'sum':
-            graph_embedding = scatter(h_scalar, index=batch, dim=0, reduce='sum')
+            graph_embedding = scatter(t, index=batch, dim=0, reduce='sum')
         elif self.pooling_type == 'max':
-            graph_embedding = scatter(h_scalar, index=batch, dim=0, reduce='max')
+            graph_embedding = scatter(t, index=batch, dim=0, reduce='max')
         else:
             # Default to mean
-            graph_embedding = scatter(h_scalar, index=batch, dim=0, reduce='mean')
+            graph_embedding = scatter(t, index=batch, dim=0, reduce='mean')
 
         # Project to output
         output = self.output_projection(graph_embedding)
@@ -856,7 +942,16 @@ class RNAPocketEncoderV2(nn.Module):
         return output
 
     def get_node_embeddings(self, data):
-        """Get per-node embeddings (before pooling)."""
+        """
+        Get per-node invariant embeddings (before pooling).
+
+        Returns invariant features t_i for each atom, which includes:
+        - Scalar features (l=0)
+        - L2 norms of vectors (l=1)
+        - L2 norms of tensors (l=2)
+
+        This ensures compatibility with E3-invariant ligand embeddings.
+        """
         x, pos, edge_index = data.x, data.pos, data.edge_index
         edge_attr = data.edge_attr if hasattr(data, 'edge_attr') else None
 
@@ -884,10 +979,10 @@ class RNAPocketEncoderV2(nn.Module):
 
             h = h_new
 
-        # Extract scalars
-        h_scalar = h[:, :self.scalar_dim]
+        # Extract invariant features
+        t = self.extract_invariant_features(h)
 
-        return h_scalar
+        return t
 
 
 # ============================================================================
@@ -911,11 +1006,11 @@ if __name__ == "__main__":
     num_dihedrals = 80
     num_nonbonded = 200
 
-    # Create realistic test data
+    # Create realistic test data (0-indexed)
     x = torch.zeros(num_nodes, 4)
-    x[:, 0] = torch.randint(1, encoder.num_atom_types + 1, (num_nodes,)).float()  # atom_type_idx
+    x[:, 0] = torch.randint(0, encoder.num_atom_types, (num_nodes,)).float()  # atom_type_idx (0-indexed)
     x[:, 1] = torch.randn(num_nodes) * 0.5  # charge
-    x[:, 2] = torch.randint(1, encoder.num_residues + 1, (num_nodes,)).float()  # residue_idx
+    x[:, 2] = torch.randint(0, encoder.num_residues, (num_nodes,)).float()  # residue_idx (0-indexed)
     x[:, 3] = torch.randint(1, 20, (num_nodes,)).float()  # atomic_num (1-19 common elements)
 
     data = Data(
