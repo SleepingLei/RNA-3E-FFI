@@ -646,11 +646,12 @@ class RNAPocketEncoderV2(nn.Module):
         self.use_nonbonded = use_nonbonded
 
         # Learnable combining weights for multi-hop and non-bonded contributions
+        # Use log-space parameters to ensure weights stay positive and bounded
         if use_multi_hop:
-            self.angle_weight = nn.Parameter(torch.tensor(0.333))  # Initial: 0.5
-            self.dihedral_weight = nn.Parameter(torch.tensor(0.333))  # Initial: 0.3
+            self.angle_weight_raw = nn.Parameter(torch.log(torch.tensor(0.333)))
+            self.dihedral_weight_raw = nn.Parameter(torch.log(torch.tensor(0.333)))
         if use_nonbonded:
-            self.nonbonded_weight = nn.Parameter(torch.tensor(0.333))  # Initial: 0.2
+            self.nonbonded_weight_raw = nn.Parameter(torch.log(torch.tensor(0.333)))
 
         # Input embedding
         self.input_embedding = AMBERFeatureEmbedding(
@@ -755,10 +756,34 @@ class RNAPocketEncoderV2(nn.Module):
             self.pooling_mlp = None
 
         # Output projection (uses invariant representation)
+        # Note: Always use LayerNorm at output to prevent numerical instability
+        # Even if use_layer_norm=False for message passing layers
         self.output_projection = nn.Sequential(
             nn.Linear(self.invariant_dim, output_dim),
             nn.LayerNorm(output_dim)
         )
+
+    @property
+    def angle_weight(self):
+        """Get angle weight (ensures it stays positive and bounded)."""
+        if hasattr(self, 'angle_weight_raw'):
+            # Clamp to prevent extreme values
+            return torch.exp(torch.clamp(self.angle_weight_raw, min=-5, max=5))
+        return None
+
+    @property
+    def dihedral_weight(self):
+        """Get dihedral weight (ensures it stays positive and bounded)."""
+        if hasattr(self, 'dihedral_weight_raw'):
+            return torch.exp(torch.clamp(self.dihedral_weight_raw, min=-5, max=5))
+        return None
+
+    @property
+    def nonbonded_weight(self):
+        """Get nonbonded weight (ensures it stays positive and bounded)."""
+        if hasattr(self, 'nonbonded_weight_raw'):
+            return torch.exp(torch.clamp(self.nonbonded_weight_raw, min=-5, max=5))
+        return None
 
     def _build_irreps_slices(self):
         """
