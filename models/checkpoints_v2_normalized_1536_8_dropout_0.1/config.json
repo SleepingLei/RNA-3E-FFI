@@ -30,6 +30,6 @@
   "seed": 42,
   "output_dir": "models/checkpoints_v2_normalized_1536_8_dropout_0.1",
   "save_every": 5,
-  "resume": false,
-  "checkpoint": "models/checkpoints_v2_normalized_1351_4/best_model.pt"
+  "resume": true,
+  "checkpoint": "models/checkpoints_v2_normalized_1536_8_dropout_0.1/checkpoint_epoch_105.pt"
 }

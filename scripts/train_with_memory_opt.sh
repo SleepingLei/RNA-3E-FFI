@@ -30,6 +30,6 @@ python scripts/04_train_model.py \
     --save_every 5 \
     --num_layers 8 --use_layer_norm --dropout 0.1 \
     --output_dir models/checkpoints_v2_normalized_1536_8_dropout_0.1 \
-    #--resume --checkpoint models/checkpoints_v2_normalized_1536_8_dropout_0.1/best_model.pt
+    --resume --checkpoint models/checkpoints_v2_normalized_1536_8_dropout_0.1/checkpoint_epoch_105.pt
 echo ""
 echo "Training completed!"
