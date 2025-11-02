@@ -346,12 +346,12 @@ def train_epoch(model, loader, optimizer, device, loss_fn='cosine',
         metrics[key] = value / num_batches
 
     # Get learnable weights if available
-    if hasattr(model, 'get_angle_weight'):
-        metrics['angle_weight'] = model.get_angle_weight().item()
-    if hasattr(model, 'get_dihedral_weight'):
-        metrics['dihedral_weight'] = model.get_dihedral_weight().item()
-    if hasattr(model, 'get_nonbonded_weight'):
-        metrics['nonbonded_weight'] = model.get_nonbonded_weight().item()
+    if hasattr(model, 'angle_weight'):
+        metrics['angle_weight'] = model.angle_weight.item()
+    if hasattr(model, 'dihedral_weight'):
+        metrics['dihedral_weight'] = model.dihedral_weight.item()
+    if hasattr(model, 'nonbonded_weight'):
+        metrics['nonbonded_weight'] = model.nonbonded_weight.item()
 
     return metrics
 
@@ -717,10 +717,10 @@ def main():
     print(f"  Non-bonded: {args.use_nonbonded}")
     print(f"  Pooling: {args.pooling_type}")
     if args.use_multi_hop:
-        print(f"  Initial angle weight: {model.get_angle_weight().item():.3f}")
-        print(f"  Initial dihedral weight: {model.get_dihedral_weight().item():.3f}")
+        print(f"  Initial angle weight: {model.angle_weight.item():.3f}")
+        print(f"  Initial dihedral weight: {model.dihedral_weight.item():.3f}")
     if args.use_nonbonded:
-        print(f"  Initial nonbonded weight: {model.get_nonbonded_weight().item():.3f}")
+        print(f"  Initial nonbonded weight: {model.nonbonded_weight.item():.3f}")
 
     # Initialize optimizer
     if args.optimizer == "adamw":
@@ -981,12 +981,12 @@ def main():
     # Print final learnable weights
     if args.use_multi_hop or args.use_nonbonded:
         print("\nFinal learnable weights:")
-        if hasattr(model, 'get_angle_weight'):
-            print(f"  Angle weight: {model.get_angle_weight().item():.4f} (initial: 0.333)")
-        if hasattr(model, 'get_dihedral_weight'):
-            print(f"  Dihedral weight: {model.get_dihedral_weight().item():.4f} (initial: 0.333)")
-        if hasattr(model, 'get_nonbonded_weight'):
-            print(f"  Nonbonded weight: {model.get_nonbonded_weight().item():.4f} (initial: 0.333)")
+        if hasattr(model, 'angle_weight'):
+            print(f"  Angle weight: {model.angle_weight.item():.4f} (initial: 0.333)")
+        if hasattr(model, 'dihedral_weight'):
+            print(f"  Dihedral weight: {model.dihedral_weight.item():.4f} (initial: 0.333)")
+        if hasattr(model, 'nonbonded_weight'):
+            print(f"  Nonbonded weight: {model.nonbonded_weight.item():.4f} (initial: 0.333)")
 
         # If using fixed version, show log-space parameters
         if args.use_weight_constraints and hasattr(model, 'get_weight_summary'):

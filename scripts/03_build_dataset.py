@@ -138,6 +138,12 @@ def build_graph_from_files(rna_pdb_path, prmtop_path, distance_cutoff=5.0, add_n
 
         edge_index = torch.tensor(edge_index, dtype=torch.long).t().contiguous()
         edge_attr_bonded = torch.tensor(edge_attr_bonded, dtype=torch.float)
+        if edge_attr_bonded.shape[0] > 0:
+            req = edge_attr_bonded[:, 0]
+            k = edge_attr_bonded[:, 1]
+            req_norm = req / 2.0
+            k_norm = k / 500.0 
+            edge_attr_bonded = torch.stack([req_norm, k_norm], dim=1)
 
         # ========================================
         # 4. ANGLE PATHS (2-hop) - ANGLES_WITHOUT_HYDROGEN
@@ -267,9 +273,50 @@ def build_graph_from_files(rna_pdb_path, prmtop_path, distance_cutoff=5.0, add_n
         if len(nonbonded_edges) > 0:
             nonbonded_edge_index = torch.tensor(nonbonded_edges, dtype=torch.long).t().contiguous()
             nonbonded_edge_attr = torch.tensor(nonbonded_attr, dtype=torch.float)
+
+            # Normalize nonbonded attributes to prevent numerical overflow
+            # nonbonded_edge_attr: [num_edges, 3] = [LJ_A, LJ_B, distance]
+            # Use log transformation for LJ parameters (they can be extremely large: >10^6)
+            lj_a = nonbonded_edge_attr[:, 0]
+            lj_b = nonbonded_edge_attr[:, 1]
+            dist = nonbonded_edge_attr[:, 2]
+
+            # Log transform (add 1 to handle zeros)
+            lj_a_log = torch.log(lj_a + 1.0)
+            lj_b_log = torch.log(lj_b + 1.0)
+
+            # Reconstruct with normalized values
+            nonbonded_edge_attr = torch.stack([lj_a_log, lj_b_log, dist], dim=1)
         else:
             nonbonded_edge_index = torch.zeros((2, 0), dtype=torch.long)
             nonbonded_edge_attr = torch.zeros((0, 3), dtype=torch.float)
+
+        # ========================================
+        # Normalize angle and dihedral attributes
+        # ========================================
+        # Angle attributes: [theta_eq, k] - k (force constant) can be very large
+        if triple_attr.shape[0] > 0:
+            theta_eq = triple_attr[:, 0]  # Equilibrium angle (degrees)
+            k_angle = triple_attr[:, 1]   # Force constant (can be 40-140)
+
+            # Normalize to [0, 1] range approximately
+            theta_eq_norm = theta_eq / 180.0  # Degrees to [0, 1]
+            k_angle_norm = k_angle / 200.0    # Typical max ~140, normalized
+
+            triple_attr = torch.stack([theta_eq_norm, k_angle_norm], dim=1)
+
+        # Dihedral attributes: [phi_k, per, phase] - phi_k (barrier height) can be large
+        if quadra_attr.shape[0] > 0:
+            phi_k = quadra_attr[:, 0]   # Barrier height (can be 0-20)
+            per = quadra_attr[:, 1]     # Periodicity (1-6)
+            phase = quadra_attr[:, 2]   # Phase angle (radians, 0-2π)
+
+            # Normalize
+            phi_k_norm = phi_k / 20.0   # Typical max ~20
+            per_norm = per / 6.0        # Max periodicity is 6
+            phase_norm = phase / (2 * 3.14159)  # Radians to [0, 1]
+
+            quadra_attr = torch.stack([phi_k_norm, per_norm, phase_norm], dim=1)
 
         # ========================================
         # 7. CREATE DATA OBJECT
