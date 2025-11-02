@@ -763,27 +763,18 @@ class RNAPocketEncoderV2(nn.Module):
             nn.LayerNorm(output_dim)
         )
 
-    @property
-    def angle_weight(self):
+    def get_angle_weight(self):
         """Get angle weight (ensures it stays positive and bounded)."""
-        if hasattr(self, 'angle_weight_raw'):
-            # Clamp to prevent extreme values
-            return torch.exp(torch.clamp(self.angle_weight_raw, min=-5, max=5))
-        return None
+        # Clamp to prevent extreme values: exp(-5) ≈ 0.0067, exp(5) ≈ 148
+        return torch.exp(torch.clamp(self.angle_weight_raw, min=-5, max=5))
 
-    @property
-    def dihedral_weight(self):
+    def get_dihedral_weight(self):
         """Get dihedral weight (ensures it stays positive and bounded)."""
-        if hasattr(self, 'dihedral_weight_raw'):
-            return torch.exp(torch.clamp(self.dihedral_weight_raw, min=-5, max=5))
-        return None
+        return torch.exp(torch.clamp(self.dihedral_weight_raw, min=-5, max=5))
 
-    @property
-    def nonbonded_weight(self):
+    def get_nonbonded_weight(self):
         """Get nonbonded weight (ensures it stays positive and bounded)."""
-        if hasattr(self, 'nonbonded_weight_raw'):
-            return torch.exp(torch.clamp(self.nonbonded_weight_raw, min=-5, max=5))
-        return None
+        return torch.exp(torch.clamp(self.nonbonded_weight_raw, min=-5, max=5))
 
     def _build_irreps_slices(self):
         """
@@ -902,19 +893,19 @@ class RNAPocketEncoderV2(nn.Module):
             # 2-hop angle message passing (learnable weight)
             if self.use_multi_hop and hasattr(data, 'triple_index'):
                 h_angle = self.angle_mp_layers[i](h, data.triple_index, data.triple_attr)
-                h_new = h_new + self.angle_weight * h_angle
+                h_new = h_new + self.get_angle_weight() * h_angle
 
             # 3-hop dihedral message passing (learnable weight)
             if self.use_multi_hop and hasattr(data, 'quadra_index'):
                 h_dihedral = self.dihedral_mp_layers[i](h, data.quadra_index, data.quadra_attr)
-                h_new = h_new + self.dihedral_weight * h_dihedral
+                h_new = h_new + self.get_dihedral_weight() * h_dihedral
 
             # Non-bonded message passing (learnable weight)
             if self.use_nonbonded and hasattr(data, 'nonbonded_edge_index'):
                 h_nonbonded = self.nonbonded_mp_layers[i](
                     h, pos, data.nonbonded_edge_index, data.nonbonded_edge_attr
                 )
-                h_new = h_new + self.nonbonded_weight * h_nonbonded
+                h_new = h_new + self.get_nonbonded_weight() * h_nonbonded
 
             h = h_new
 
@@ -990,17 +981,17 @@ class RNAPocketEncoderV2(nn.Module):
 
             if self.use_multi_hop and hasattr(data, 'triple_index'):
                 h_angle = self.angle_mp_layers[i](h, data.triple_index, data.triple_attr)
-                h_new = h_new + self.angle_weight * h_angle
+                h_new = h_new + self.get_angle_weight() * h_angle
 
             if self.use_multi_hop and hasattr(data, 'quadra_index'):
                 h_dihedral = self.dihedral_mp_layers[i](h, data.quadra_index, data.quadra_attr)
-                h_new = h_new + self.dihedral_weight * h_dihedral
+                h_new = h_new + self.get_dihedral_weight() * h_dihedral
 
             if self.use_nonbonded and hasattr(data, 'nonbonded_edge_index'):
                 h_nonbonded = self.nonbonded_mp_layers[i](
                     h, pos, data.nonbonded_edge_index, data.nonbonded_edge_attr
                 )
-                h_new = h_new + self.nonbonded_weight * h_nonbonded
+                h_new = h_new + self.get_nonbonded_weight() * h_nonbonded
 
             h = h_new
 
