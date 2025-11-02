@@ -146,7 +146,105 @@ class LigandEmbeddingDataset(torch.utils.data.Dataset):
         return data
 
 
-def train_epoch(model, loader, optimizer, device):
+def compute_loss(pred, target, loss_fn='cosine', cosine_weight=0.7, mse_weight=0.3, temperature=0.07):
+    """
+    Compute loss based on specified loss function.
+
+    Args:
+        pred: Predicted embeddings [batch_size, embedding_dim]
+        target: Target embeddings [batch_size, embedding_dim]
+        loss_fn: Loss function type ('mse', 'cosine', 'cosine_mse', 'infonce')
+        cosine_weight: Weight for cosine loss in cosine_mse mode
+        mse_weight: Weight for MSE loss in cosine_mse mode
+        temperature: Temperature for InfoNCE loss
+
+    Returns:
+        loss: Computed loss (scalar)
+        metrics: Dictionary with detailed metrics for logging
+    """
+    metrics = {}
+
+    if loss_fn == 'mse':
+        # MSE Loss
+        loss = F.mse_loss(pred, target)
+        metrics['mse_loss'] = loss.item()
+
+        # Also compute cosine for monitoring
+        with torch.no_grad():
+            cosine_sim = F.cosine_similarity(pred, target, dim=1).mean()
+            metrics['cosine_similarity'] = cosine_sim.item()
+
+    elif loss_fn == 'cosine':
+        # Cosine Similarity Loss
+        cosine_sim = F.cosine_similarity(pred, target, dim=1)
+        loss = (1 - cosine_sim).mean()
+        metrics['cosine_loss'] = loss.item()
+        metrics['cosine_similarity'] = cosine_sim.mean().item()
+
+        # Also compute MSE for monitoring
+        with torch.no_grad():
+            mse = F.mse_loss(pred, target)
+            metrics['mse_loss'] = mse.item()
+
+    elif loss_fn == 'cosine_mse':
+        # Combined: Cosine + MSE
+        cosine_sim = F.cosine_similarity(pred, target, dim=1)
+        cosine_loss = (1 - cosine_sim).mean()
+        mse_loss = F.mse_loss(pred, target)
+
+        loss = cosine_weight * cosine_loss + mse_weight * mse_loss
+
+        metrics['total_loss'] = loss.item()
+        metrics['cosine_loss'] = cosine_loss.item()
+        metrics['mse_loss'] = mse_loss.item()
+        metrics['cosine_similarity'] = cosine_sim.mean().item()
+        metrics['cosine_weight'] = cosine_weight
+        metrics['mse_weight'] = mse_weight
+
+    elif loss_fn == 'infonce':
+        # InfoNCE Contrastive Loss
+        batch_size = pred.shape[0]
+
+        # Normalize embeddings
+        pred_norm = F.normalize(pred, dim=1)
+        target_norm = F.normalize(target, dim=1)
+
+        # Compute similarity matrix [batch_size, batch_size]
+        logits = torch.matmul(pred_norm, target_norm.T) / temperature
+
+        # Labels: diagonal elements are positive pairs
+        labels = torch.arange(batch_size, device=pred.device, dtype=torch.long)
+
+        # Cross-entropy loss (symmetric)
+        loss_p2t = F.cross_entropy(logits, labels)
+        loss_t2p = F.cross_entropy(logits.T, labels)
+        loss = (loss_p2t + loss_t2p) / 2
+
+        metrics['infonce_loss'] = loss.item()
+        metrics['temperature'] = temperature
+
+        # Compute accuracy (how often correct pair ranks first)
+        with torch.no_grad():
+            pred_labels = logits.argmax(dim=1)
+            accuracy = (pred_labels == labels).float().mean()
+            metrics['infonce_accuracy'] = accuracy.item()
+
+            # Also compute cosine similarity for monitoring
+            cosine_sim = F.cosine_similarity(pred, target, dim=1).mean()
+            metrics['cosine_similarity'] = cosine_sim.item()
+
+            # And MSE
+            mse = F.mse_loss(pred, target)
+            metrics['mse_loss'] = mse.item()
+
+    else:
+        raise ValueError(f"Unknown loss function: {loss_fn}")
+
+    return loss, metrics
+
+
+def train_epoch(model, loader, optimizer, device, loss_fn='cosine',
+                cosine_weight=0.7, mse_weight=0.3, temperature=0.07):
     """
     Train for one epoch.
 
@@ -155,6 +253,10 @@ def train_epoch(model, loader, optimizer, device):
         loader: DataLoader for training data
         optimizer: Optimizer
         device: Device to train on
+        loss_fn: Loss function type ('mse', 'cosine', 'cosine_mse', 'infonce')
+        cosine_weight: Weight for cosine loss in cosine_mse mode
+        mse_weight: Weight for MSE loss in cosine_mse mode
+        temperature: Temperature for InfoNCE loss
 
     Returns:
         Dictionary with training metrics including loss and learnable weights
@@ -162,6 +264,7 @@ def train_epoch(model, loader, optimizer, device):
     model.train()
     total_loss = 0
     num_batches = 0
+    accumulated_metrics = {}
 
     for batch_idx, batch in enumerate(tqdm(loader, desc="Training")):
         batch = batch.to(device)
@@ -176,10 +279,14 @@ def train_epoch(model, loader, optimizer, device):
             batch_size = batch.num_graphs if hasattr(batch, 'num_graphs') else pocket_embedding.size(0)
             target_embedding = target_embedding.view(batch_size, -1)
 
-        # Cosine Similarity Loss (1 - cosine_similarity)
-        # We want to maximize cosine similarity, so minimize (1 - cosine_similarity)
-        cosine_sim = F.cosine_similarity(pocket_embedding, target_embedding, dim=1)
-        loss = (1 - cosine_sim).mean()
+        # Compute loss using specified loss function
+        loss, batch_metrics = compute_loss(
+            pocket_embedding, target_embedding,
+            loss_fn=loss_fn,
+            cosine_weight=cosine_weight,
+            mse_weight=mse_weight,
+            temperature=temperature
+        )
 
         # Backward pass
         optimizer.zero_grad()
@@ -190,9 +297,14 @@ def train_epoch(model, loader, optimizer, device):
 
         optimizer.step()
 
-        # Record loss before clearing variables
+        # Accumulate metrics
         total_loss += loss.item()
         num_batches += 1
+
+        for key, value in batch_metrics.items():
+            if key not in accumulated_metrics:
+                accumulated_metrics[key] = 0
+            accumulated_metrics[key] += value
 
         # Explicitly delete to free memory
         del pocket_embedding, target_embedding, loss, batch
@@ -204,9 +316,12 @@ def train_epoch(model, loader, optimizer, device):
             if (batch_idx + 1) % 20 == 0:
                 torch.cuda.synchronize()
 
-    # Get learnable weights if available
+    # Average accumulated metrics
     metrics = {'loss': total_loss / num_batches}
+    for key, value in accumulated_metrics.items():
+        metrics[key] = value / num_batches
 
+    # Get learnable weights if available
     if hasattr(model, 'angle_weight'):
         metrics['angle_weight'] = model.angle_weight.item()
     if hasattr(model, 'dihedral_weight'):
@@ -217,7 +332,8 @@ def train_epoch(model, loader, optimizer, device):
     return metrics
 
 
-def evaluate(model, loader, device):
+def evaluate(model, loader, device, loss_fn='cosine',
+             cosine_weight=0.7, mse_weight=0.3, temperature=0.07):
     """
     Evaluate model on validation/test set.
 
@@ -225,15 +341,18 @@ def evaluate(model, loader, device):
         model: The model to evaluate
         loader: DataLoader for evaluation data
         device: Device to evaluate on
+        loss_fn: Loss function type ('mse', 'cosine', 'cosine_mse', 'infonce')
+        cosine_weight: Weight for cosine loss in cosine_mse mode
+        mse_weight: Weight for MSE loss in cosine_mse mode
+        temperature: Temperature for InfoNCE loss
 
     Returns:
         Dictionary with evaluation metrics
     """
     model.eval()
     total_loss = 0
-    total_cosine_sim = 0
-    total_mse = 0  # Still track MSE for comparison
     num_batches = 0
+    accumulated_metrics = {}
 
     with torch.no_grad():
         for batch_idx, batch in enumerate(tqdm(loader, desc="Evaluating")):
@@ -249,30 +368,37 @@ def evaluate(model, loader, device):
                 batch_size = batch.num_graphs if hasattr(batch, 'num_graphs') else pocket_embedding.size(0)
                 target_embedding = target_embedding.view(batch_size, -1)
 
-            # Cosine Similarity Loss (primary metric)
-            cosine_sim = F.cosine_similarity(pocket_embedding, target_embedding, dim=1)
-            cosine_loss = (1 - cosine_sim).mean()
+            # Compute loss using specified loss function
+            loss, batch_metrics = compute_loss(
+                pocket_embedding, target_embedding,
+                loss_fn=loss_fn,
+                cosine_weight=cosine_weight,
+                mse_weight=mse_weight,
+                temperature=temperature
+            )
 
-            # Also track MSE for comparison
-            mse = F.mse_loss(pocket_embedding, target_embedding)
-
-            total_loss += cosine_loss.item()
-            total_cosine_sim += cosine_sim.mean().item()
-            total_mse += mse.item()
+            total_loss += loss.item()
             num_batches += 1
 
+            # Accumulate metrics
+            for key, value in batch_metrics.items():
+                if key not in accumulated_metrics:
+                    accumulated_metrics[key] = 0
+                accumulated_metrics[key] += value
+
             # Explicitly delete to free memory
-            del pocket_embedding, target_embedding, cosine_sim, cosine_loss, mse, batch
+            del pocket_embedding, target_embedding, loss, batch
 
             # More aggressive cache clearing during validation
             if device.type == 'cuda' and (batch_idx + 1) % 5 == 0:
                 torch.cuda.empty_cache()
 
-    return {
-        'cosine_loss': total_loss / num_batches,
-        'avg_cosine_similarity': total_cosine_sim / num_batches,
-        'mse_loss': total_mse / num_batches  # For comparison
-    }
+    # Average accumulated metrics
+    result = {'loss': total_loss / num_batches}
+    for key, value in accumulated_metrics.items():
+        result[key] = value / num_batches
+
+    return result
 
 
 def main():
@@ -321,6 +447,16 @@ def main():
                         help="Dropout rate")
 
     # Training arguments
+    parser.add_argument("--loss_fn", type=str, default="cosine",
+                        choices=["mse", "cosine", "cosine_mse", "infonce"],
+                        help="Loss function: mse (MSE), cosine (Cosine Similarity), "
+                             "cosine_mse (Cosine + MSE), infonce (InfoNCE contrastive)")
+    parser.add_argument("--cosine_weight", type=float, default=0.7,
+                        help="Weight for cosine loss in cosine_mse mode (default: 0.7)")
+    parser.add_argument("--mse_weight", type=float, default=0.3,
+                        help="Weight for MSE loss in cosine_mse mode (default: 0.3)")
+    parser.add_argument("--temperature", type=float, default=0.07,
+                        help="Temperature for InfoNCE loss (default: 0.07)")
     parser.add_argument("--batch_size", type=int, default=2,
                         help="Batch size")
     parser.add_argument("--num_epochs", type=int, default=300,
@@ -636,6 +772,21 @@ def main():
         'nonbonded_weight': []
     }
 
+    # Print loss function configuration
+    print("\n" + "="*60)
+    print("Loss Function Configuration")
+    print("="*60)
+    print(f"Loss Function: {args.loss_fn}")
+    if args.loss_fn == 'cosine_mse':
+        print(f"  Cosine weight: {args.cosine_weight}")
+        print(f"  MSE weight: {args.mse_weight}")
+    elif args.loss_fn == 'infonce':
+        print(f"  Temperature: {args.temperature}")
+        print(f"  ⚠️  Note: InfoNCE requires batch_size >= 16 for effective negative sampling")
+        if args.batch_size < 16:
+            print(f"  ⚠️  Warning: Current batch_size={args.batch_size} may be too small for InfoNCE")
+    print("="*60)
+
     print("\nStarting training...\n")
     for epoch in range(start_epoch, args.num_epochs + 1):
         print(f"Epoch {epoch}/{args.num_epochs}")
@@ -647,9 +798,22 @@ def main():
             torch.cuda.synchronize()
 
         # Train
-        train_metrics = train_epoch(model, train_loader, optimizer, device)
+        train_metrics = train_epoch(
+            model, train_loader, optimizer, device,
+            loss_fn=args.loss_fn,
+            cosine_weight=args.cosine_weight,
+            mse_weight=args.mse_weight,
+            temperature=args.temperature
+        )
         train_loss = train_metrics['loss']
-        print(f"Train Loss: {train_loss:.6f}")
+
+        # Format training metrics output based on loss function
+        train_str = f"Train Loss: {train_loss:.6f}"
+        if 'cosine_similarity' in train_metrics:
+            train_str += f", Cosine Sim: {train_metrics['cosine_similarity']:.4f}"
+        if 'infonce_accuracy' in train_metrics:
+            train_str += f", InfoNCE Acc: {train_metrics['infonce_accuracy']*100:.2f}%"
+        print(train_str)
 
         # Print learnable weights if available
         if 'angle_weight' in train_metrics:
@@ -663,11 +827,25 @@ def main():
             weight_history['nonbonded_weight'].append(train_metrics['nonbonded_weight'])
 
         # Validate
-        val_metrics = evaluate(model, val_loader, device)
-        val_loss = val_metrics['cosine_loss']
-        val_cosine_sim = val_metrics['avg_cosine_similarity']
-        val_mse = val_metrics['mse_loss']
-        print(f"Val Cosine Loss: {val_loss:.6f}, Val Cosine Sim: {val_cosine_sim:.4f}, Val MSE: {val_mse:.4f}")
+        val_metrics = evaluate(
+            model, val_loader, device,
+            loss_fn=args.loss_fn,
+            cosine_weight=args.cosine_weight,
+            mse_weight=args.mse_weight,
+            temperature=args.temperature
+        )
+        val_loss = val_metrics['loss']
+
+        # Format validation metrics output based on loss function
+        val_str = f"Val Loss: {val_loss:.6f}"
+        if 'cosine_similarity' in val_metrics:
+            val_cosine_sim = val_metrics['cosine_similarity']
+            val_str += f", Cosine Sim: {val_cosine_sim:.4f}"
+        if 'mse_loss' in val_metrics:
+            val_str += f", MSE: {val_metrics['mse_loss']:.4f}"
+        if 'infonce_accuracy' in val_metrics:
+            val_str += f", InfoNCE Acc: {val_metrics['infonce_accuracy']*100:.2f}%"
+        print(val_str)
 
         # Update learning rate
         if args.scheduler == "plateau":
@@ -680,7 +858,8 @@ def main():
         # Save history
         train_history.append(train_loss)
         val_history.append(val_loss)
-        cosine_sim_history.append(val_cosine_sim)
+        if 'cosine_similarity' in val_metrics:
+            cosine_sim_history.append(val_metrics['cosine_similarity'])
 
         # Save checkpoint
         if epoch % args.save_every == 0:
