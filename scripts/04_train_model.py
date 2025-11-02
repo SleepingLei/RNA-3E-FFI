@@ -176,8 +176,10 @@ def train_epoch(model, loader, optimizer, device):
             batch_size = batch.num_graphs if hasattr(batch, 'num_graphs') else pocket_embedding.size(0)
             target_embedding = target_embedding.view(batch_size, -1)
 
-        # MSE loss
-        loss = F.mse_loss(pocket_embedding, target_embedding)
+        # Cosine Similarity Loss (1 - cosine_similarity)
+        # We want to maximize cosine similarity, so minimize (1 - cosine_similarity)
+        cosine_sim = F.cosine_similarity(pocket_embedding, target_embedding, dim=1)
+        loss = (1 - cosine_sim).mean()
 
         # Backward pass
         optimizer.zero_grad()
@@ -229,7 +231,8 @@ def evaluate(model, loader, device):
     """
     model.eval()
     total_loss = 0
-    total_l1_loss = 0
+    total_cosine_sim = 0
+    total_mse = 0  # Still track MSE for comparison
     num_batches = 0
 
     with torch.no_grad():
@@ -246,24 +249,29 @@ def evaluate(model, loader, device):
                 batch_size = batch.num_graphs if hasattr(batch, 'num_graphs') else pocket_embedding.size(0)
                 target_embedding = target_embedding.view(batch_size, -1)
 
-            # MSE loss
-            mse_loss = F.mse_loss(pocket_embedding, target_embedding)
-            l1_loss = F.l1_loss(pocket_embedding, target_embedding)
+            # Cosine Similarity Loss (primary metric)
+            cosine_sim = F.cosine_similarity(pocket_embedding, target_embedding, dim=1)
+            cosine_loss = (1 - cosine_sim).mean()
 
-            total_loss += mse_loss.item()
-            total_l1_loss += l1_loss.item()
+            # Also track MSE for comparison
+            mse = F.mse_loss(pocket_embedding, target_embedding)
+
+            total_loss += cosine_loss.item()
+            total_cosine_sim += cosine_sim.mean().item()
+            total_mse += mse.item()
             num_batches += 1
 
             # Explicitly delete to free memory
-            del pocket_embedding, target_embedding, mse_loss, l1_loss, batch
+            del pocket_embedding, target_embedding, cosine_sim, cosine_loss, mse, batch
 
             # More aggressive cache clearing during validation
             if device.type == 'cuda' and (batch_idx + 1) % 5 == 0:
                 torch.cuda.empty_cache()
 
     return {
-        'mse_loss': total_loss / num_batches,
-        'l1_loss': total_l1_loss / num_batches
+        'cosine_loss': total_loss / num_batches,
+        'avg_cosine_similarity': total_cosine_sim / num_batches,
+        'mse_loss': total_mse / num_batches  # For comparison
     }
 
 
@@ -588,6 +596,7 @@ def main():
     patience_counter = 0
     train_history = []
     val_history = []
+    cosine_sim_history = []  # Track cosine similarity
 
     if args.resume:
         checkpoint_path = Path(args.checkpoint)
@@ -610,6 +619,7 @@ def main():
                     history = json.load(f)
                     train_history = history.get('train_loss', [])
                     val_history = history.get('val_loss', [])
+                    cosine_sim_history = history.get('val_cosine_similarity', [])
 
             print(f"Resumed from epoch {checkpoint['epoch']}")
             print(f"Best validation loss so far: {best_val_loss:.6f}")
@@ -654,8 +664,10 @@ def main():
 
         # Validate
         val_metrics = evaluate(model, val_loader, device)
-        val_loss = val_metrics['mse_loss']
-        print(f"Val Loss: {val_loss:.6f}, Val L1: {val_metrics['l1_loss']:.6f}")
+        val_loss = val_metrics['cosine_loss']
+        val_cosine_sim = val_metrics['avg_cosine_similarity']
+        val_mse = val_metrics['mse_loss']
+        print(f"Val Cosine Loss: {val_loss:.6f}, Val Cosine Sim: {val_cosine_sim:.4f}, Val MSE: {val_mse:.4f}")
 
         # Update learning rate
         if args.scheduler == "plateau":
@@ -668,6 +680,7 @@ def main():
         # Save history
         train_history.append(train_loss)
         val_history.append(val_loss)
+        cosine_sim_history.append(val_cosine_sim)
 
         # Save checkpoint
         if epoch % args.save_every == 0:
@@ -724,6 +737,7 @@ def main():
     history = {
         'train_loss': train_history,
         'val_loss': val_history,
+        'val_cosine_similarity': cosine_sim_history,
         'learnable_weights': weight_history,
         'config': vars(args)
     }
@@ -731,7 +745,9 @@ def main():
         json.dump(history, f, indent=2)
 
     print("\nTraining complete!")
-    print(f"Best validation loss: {best_val_loss:.6f}")
+    print(f"Best validation cosine loss: {best_val_loss:.6f}")
+    if cosine_sim_history:
+        print(f"Best validation cosine similarity: {max(cosine_sim_history):.4f}")
     print(f"Best model saved to {output_dir / 'best_model.pt'}")
 
     # Print final learnable weights
