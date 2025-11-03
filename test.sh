@@ -1,0 +1,13 @@
+python scripts/04_train_model.py \
+    --embeddings_path data/processed/ligand_embeddings.h5 \
+    --output_dim 1536 \
+    --batch_size 4 \
+    --num_epochs 3 \
+    --lr 5e-4 \
+    --use_multi_hop \
+    --use_gate \
+    --num_layers 6 \
+    --dropout 0.1 \
+    --loss_fn cosine \
+    --monitor_gradients \
+    --output_dir models/checkpoints_test_no_nonbonded

@@ -194,9 +194,9 @@ def main():
                         help="Path to HARIBOSS complexes CSV file")
     parser.add_argument("--compounds_csv", type=str, default="hariboss/compounds.csv",
                         help="Path to compounds CSV file with SMILES")
-    parser.add_argument("--output_dir", type=str, default="data/processed/ligands",
+    parser.add_argument("--output_dir", type=str, default="data/processed/ligand_768",
                         help="Output directory for processed data")
-    parser.add_argument("--output_h5", type=str, default="data/processed/ligand_embeddings.h5",
+    parser.add_argument("--output_h5", type=str, default="data/processed/ligand_embeddings_768.h5",
                         help="Output HDF5 file for embeddings")
     parser.add_argument("--batch_size", type=int, default=32,
                         help="Batch size for Uni-Mol processing")

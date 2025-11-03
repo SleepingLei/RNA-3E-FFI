@@ -489,7 +489,7 @@ def main():
                         help="Learning rate")
     parser.add_argument("--weight_decay", type=float, default=5e-6,
                         help="Weight decay")
-    parser.add_argument("--optimizer", type=str, default="adam",
+    parser.add_argument("--optimizer", type=str, default="adamw",
                         choices=["adam", "adamw"],
                         help="Optimizer type")
     parser.add_argument("--scheduler", type=str, default="plateau",

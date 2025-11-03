@@ -1,24 +1,6 @@
 #!/bin/bash
-# Optimized training script with memory management
-
-# Set PyTorch memory allocation settings to reduce fragmentation
-export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:128
-
-# Optional: Enable memory debugging (comment out for production)
-# export CUDA_LAUNCH_BLOCKING=1
-
-# Reduce batch size if still having OOM issues
-BATCH_SIZE=${1:-2}  # Default to 2, can pass as first argument
-
-echo "=========================================="
-echo "Training with Memory Optimization"
-echo "=========================================="
-echo "PYTORCH_CUDA_ALLOC_CONF: $PYTORCH_CUDA_ALLOC_CONF"
-echo "Batch size: $BATCH_SIZE"
-echo ""
-
-# Run training with optimized settings
 python scripts/04_train_model.py \
+    --embeddings_path data/processed/ligand_embeddings.h5 \
     --output_dim 1536 \
     --batch_size 1 \
     --num_epochs 300 \
@@ -28,8 +10,11 @@ python scripts/04_train_model.py \
     --use_nonbonded \
     --use_gate \
     --save_every 5 \
-    --num_layers 8 --use_layer_norm --dropout 0.1 \
-    --output_dir models/checkpoints_v2_normalized_1536_8_dropout_0.1 \
-    --resume --checkpoint models/checkpoints_v2_normalized_1536_8_dropout_0.1/checkpoint_epoch_105.pt
+    --num_layers 4 \
+    #--use_layer_norm \
+    --dropout 0.1 \
+    --loss_fn cosin \
+    --monitor_gradients \
+    --output_dir models/checkpoints_mse_1536d
 echo ""
 echo "Training completed!"
