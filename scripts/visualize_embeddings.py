@@ -88,8 +88,9 @@ def load_splits(splits_file, split_names):
 
 def load_model(checkpoint_path, device):
     """Load trained model from checkpoint."""
-    from scripts.run_inference import load_model as _load_model
-    return _load_model(checkpoint_path, device)
+    import importlib
+    inference_module = importlib.import_module('scripts.05_run_inference')
+    return inference_module.load_model(checkpoint_path, device)
 
 
 def extract_pocket_id_and_ligand(filename):
@@ -129,7 +130,9 @@ def batch_inference_with_metadata(checkpoint_path, graph_dir, device, selected_i
     print("Step 1: Running Batch Inference on Pocket Graphs")
     print(f"{'='*70}\n")
 
-    from scripts.run_inference import predict_pocket_embedding
+    import importlib
+    inference_module = importlib.import_module('scripts.05_run_inference')
+    predict_pocket_embedding = inference_module.predict_pocket_embedding
 
     # Load model
     model, config = load_model(checkpoint_path, device)
