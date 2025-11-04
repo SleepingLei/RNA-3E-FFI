@@ -22,7 +22,7 @@ LIGAND_EMBEDDINGS="${LIGAND_EMBEDDINGS:-data/processed/ligand_embeddings_dedup.h
 OUTPUT_DIR="${OUTPUT_DIR:-results/embedding_analysis}"
 
 # Visualization methods (pca tsne umap)
-METHODS="${METHODS:-pca tsne umap}"
+METHODS="${METHODS:-pca tsne}"
 
 # Split selection (empty means all data)
 SPLITS_FILE="${SPLITS_FILE:-}"

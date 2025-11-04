@@ -8,7 +8,7 @@ echo "=========================================="
 python scripts/04_train_model.py \
     --embeddings_path data/processed/ligand_embeddings.h5 \
     --output_dim 1536 \
-    --batch_size 1 \
+    --batch_size 2 \
     --num_epochs 300 \
     --lr 0.001 \
     --num_workers 1 \
@@ -17,8 +17,8 @@ python scripts/04_train_model.py \
     --use_gate \
     --save_every 5 \
     --loss_fn mse --monitor_gradients \
-    --num_layers 6 --dropout 0.1 \
-    --output_dir models/checkpoints_mse_1536_6_dropout_0.1 \
-    #--resume --checkpoint models/checkpoints_mse_1536_6_dropout_0.1/best_model.pt
+    --num_layers 6 --use_layer_norm --dropout 0.1 \
+    --output_dir models/checkpoints_mse_1536_6_dropout_0.1_retry \
+    --resume --checkpoint models/checkpoints_mse_1536_6_dropout_0.1_retry/checkpoint_epoch_125.pt
 echo ""
 echo "Training completed!"

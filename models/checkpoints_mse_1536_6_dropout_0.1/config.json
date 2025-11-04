@@ -13,7 +13,7 @@
   "use_nonbonded": true,
   "use_weight_constraints": false,
   "use_gate": true,
-  "use_layer_norm": false,
+  "use_layer_norm": true,
   "pooling_type": "attention",
   "dropout": 0.1,
   "loss_fn": "mse",

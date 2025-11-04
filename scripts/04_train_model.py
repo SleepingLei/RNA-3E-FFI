@@ -499,7 +499,7 @@ def main():
                         help="Early stopping patience")
     parser.add_argument("--num_workers", type=int, default=1,
                         help="Number of data loader workers")
-    parser.add_argument("--grad_clip", type=float, default=0.0,
+    parser.add_argument("--grad_clip", type=float, default=1.0,
                         help="Gradient clipping max norm (0 to use automatic per-loss defaults)")
     parser.add_argument("--monitor_gradients", action="store_true", default=False,
                         help="Print gradient statistics during training for debugging")
