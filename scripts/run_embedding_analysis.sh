@@ -16,10 +16,10 @@ set -e  # Exit on error
 # ============================================================================
 
 # Default paths
-CHECKPOINT="${CHECKPOINT:-models/checkpoints/best_model.pt}"
+CHECKPOINT="${CHECKPOINT:-models/checkpoints_mse_1536_6_dropout_0.1_retry/best_model.pt}"
 GRAPH_DIR="${GRAPH_DIR:-data/processed/graphs}"
 LIGAND_EMBEDDINGS="${LIGAND_EMBEDDINGS:-data/processed/ligand_embeddings_dedup.h5}"
-OUTPUT_DIR="${OUTPUT_DIR:-results/embedding_analysis}"
+OUTPUT_DIR="${OUTPUT_DIR:-results/embedding_analysis_retry}"
 
 # Visualization methods (pca tsne umap)
 METHODS="${METHODS:-pca tsne}"

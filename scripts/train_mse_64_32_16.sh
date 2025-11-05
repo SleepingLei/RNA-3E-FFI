@@ -18,7 +18,8 @@ python scripts/04_train_model.py \
     --save_every 5 \
     --loss_fn mse --monitor_gradients \
     --num_layers 6 --use_layer_norm --dropout 0.1 \
-    --output_dir models/checkpoints_mse_1536_6_dropout_0.1_retry \
-    --resume --checkpoint models/checkpoints_mse_1536_6_dropout_0.1_retry/best_model.pt
+    --hidden_irreps "64x0e + 32x1o + 16x2e" \
+    --output_dir models/checkpoints_mse_1536_6_dropout_0.1_64_32_16 \
+    --resume --checkpoint models/checkpoints_mse_1536_6_dropout_0.1_64_32_16/best_model.pt
 echo ""
 echo "Training completed!"

@@ -1,0 +1,104 @@
+nohup: ignoring input
+==========================================
+Training with Memory Optimization
+==========================================
+/personal/RNA-3E-FFI/scripts/04_train_model.py:91: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  data = torch.load(graph_path)
+/opt/mamba/envs/RNA/lib/python3.11/site-packages/torch/optim/lr_scheduler.py:62: UserWarning: The verbose parameter is deprecated. Please use get_last_lr() to access the learning rate.
+  warnings.warn(
+Using device: cuda
+Loading splits from data/splits/splits.json
+Dataset splits: Train=974, Val=121, Test=123
+Dataset initialized with 974 valid complexes
+Dataset initialized with 121 valid complexes
+
+Initializing v2.0 model...
+Using RNAPocketEncoderV2 (standard)
+Vocabulary sizes: 70 atom types, 43 residues
+Model has 15,633,396 parameters
+
+Model configuration:
+  Multi-hop: True
+  Non-bonded: True
+  Pooling: attention
+  Initial angle weight: 0.333
+  Initial dihedral weight: 0.333
+  Initial nonbonded weight: 0.333
+
+Warning: Checkpoint file models/checkpoints_mse_1536_6_dropout_0.1_64_32_16/best_model.pt not found!
+Starting training from scratch...
+
+
+============================================================
+Loss Function Configuration
+============================================================
+Loss Function: mse
+
+Gradient Clipping: 1.0 (manual)
+Gradient Monitoring: ENABLED (will print every 50 batches)
+============================================================
+
+Starting training...
+
+Epoch 1/300
+------------------------------------------------------------
+Training:   0%|          | 0/974 [00:00<?, ?it/s]/personal/RNA-3E-FFI/scripts/04_train_model.py:144: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+  data.y = torch.tensor(ligand_embedding, dtype=torch.float32)
+Training:   0%|          | 1/974 [00:01<28:04,  1.73s/it]Training:   0%|          | 2/974 [00:03<25:47,  1.59s/it]Training:   0%|          | 3/974 [00:08<50:55,  3.15s/it]Training:   0%|          | 4/974 [00:11<52:33,  3.25s/it]Training:   1%|          | 5/974 [00:15<53:51,  3.33s/it]Training:   1%|          | 6/974 [00:15<37:26,  2.32s/it]Training:   1%|          | 7/974 [00:15<27:30,  1.71s/it]Training:   1%|          | 8/974 [00:16<23:53,  1.48s/it]Training:   1%|          | 9/974 [00:17<19:09,  1.19s/it]Training:   1%|          | 10/974 [00:18<19:15,  1.20s/it]Training:   1%|          | 11/974 [00:19<15:58,  1.00it/s]Training:   1%|          | 12/974 [00:19<13:07,  1.22it/s]Training:   1%|▏         | 13/974 [00:20<12:26,  1.29it/s]Training:   1%|▏         | 14/974 [00:20<11:42,  1.37it/s]Training:   2%|▏         | 15/974 [00:21<10:25,  1.53it/s]Training:   2%|▏         | 16/974 [00:22<10:40,  1.50it/s]Training:   2%|▏         | 17/974 [00:22<08:42,  1.83it/s]Training:   2%|▏         | 18/974 [00:22<08:53,  1.79it/s]Training:   2%|▏         | 19/974 [00:23<08:59,  1.77it/s]Training:   2%|▏         | 20/974 [00:24<08:48,  1.81it/s]Training:   2%|▏         | 21/974 [00:24<07:22,  2.15it/s]Training:   2%|▏         | 22/974 [00:24<07:18,  2.17it/s]Training:   2%|▏         | 23/974 [00:25<07:05,  2.24it/s]Training:   2%|▏         | 24/974 [00:25<07:33,  2.09it/s]Training:   3%|▎         | 25/974 [00:26<07:31,  2.10it/s]Training:   3%|▎         | 26/974 [00:26<06:27,  2.44it/s]Training:   3%|▎         | 27/974 [00:26<06:00,  2.63it/s]Training:   3%|▎         | 28/974 [00:27<05:45,  2.74it/s]Training:   3%|▎         | 29/974 [00:27<06:08,  2.57it/s]Training:   3%|▎         | 30/974 [00:27<06:20,  2.48it/s]Training:   3%|▎         | 31/974 [00:28<06:44,  2.33it/s]Training:   3%|▎         | 32/974 [00:28<06:26,  2.44it/s]Training:   3%|▎         | 33/974 [00:29<06:28,  2.42it/s]Training:   3%|▎         | 34/974 [00:30<09:15,  1.69it/s]Training:   4%|▎         | 35/974 [00:30<08:40,  1.80it/s]Training:   4%|▎         | 36/974 [00:31<08:40,  1.80it/s]Training:   4%|▍         | 37/974 [00:31<07:55,  1.97it/s]Training:   4%|▍         | 38/974 [00:32<08:10,  1.91it/s]Training:   4%|▍         | 39/974 [00:33<09:56,  1.57it/s]Training:   4%|▍         | 40/974 [00:33<09:12,  1.69it/s]Training:   4%|▍         | 41/974 [00:33<07:38,  2.04it/s]Training:   4%|▍         | 42/974 [00:34<06:55,  2.24it/s]Training:   4%|▍         | 43/974 [00:34<07:01,  2.21it/s]Training:   5%|▍         | 44/974 [00:35<07:25,  2.09it/s]Training:   5%|▍         | 45/974 [00:35<07:32,  2.05it/s]Training:   5%|▍         | 46/974 [00:36<07:32,  2.05it/s]Training:   5%|▍         | 47/974 [00:36<07:32,  2.05it/s]Training:   5%|▍         | 48/974 [00:37<06:47,  2.27it/s]Training:   5%|▌         | 49/974 [00:37<06:17,  2.45it/s]Training:   5%|▌         | 50/974 [00:37<06:48,  2.26it/s]Training:   5%|▌         | 51/974 [00:38<09:33,  1.61it/s]Training:   5%|▌         | 52/974 [00:39<08:33,  1.80it/s]Training:   5%|▌         | 53/974 [00:39<07:47,  1.97it/s]Training:   6%|▌         | 54/974 [00:40<08:42,  1.76it/s]Training:   6%|▌         | 55/974 [00:41<10:55,  1.40it/s]Training:   6%|▌         | 56/974 [00:41<09:43,  1.57it/s]Training:   6%|▌         | 57/974 [00:42<09:13,  1.66it/s]Training:   6%|▌         | 58/974 [00:42<08:27,  1.80it/s]Training:   6%|▌         | 59/974 [00:43<07:45,  1.96it/s]Training:   6%|▌         | 60/974 [00:43<07:57,  1.91it/s]Training:   6%|▋         | 61/974 [00:44<07:03,  2.15it/s]Training:   6%|▋         | 62/974 [00:44<06:32,  2.32it/s]Training:   6%|▋         | 63/974 [00:45<08:05,  1.88it/s]Training:   7%|▋         | 64/974 [00:45<07:52,  1.92it/s]Training:   7%|▋         | 65/974 [00:46<07:33,  2.00it/s]Training:   7%|▋         | 66/974 [00:46<08:03,  1.88it/s]Training:   7%|▋         | 67/974 [00:47<07:52,  1.92it/s]Training:   7%|▋         | 68/974 [00:47<07:11,  2.10it/s]Training:   7%|▋         | 69/974 [00:48<06:41,  2.25it/s]Training:   7%|▋         | 70/974 [00:48<08:07,  1.85it/s]Training:   7%|▋         | 71/974 [00:49<09:54,  1.52it/s]Training:   7%|▋         | 72/974 [00:50<09:29,  1.58it/s]Training:   7%|▋         | 73/974 [00:50<08:44,  1.72it/s]Training:   8%|▊         | 74/974 [00:51<08:35,  1.75it/s]Training:   8%|▊         | 75/974 [00:52<10:30,  1.42it/s]Training:   8%|▊         | 76/974 [00:53<10:06,  1.48it/s]Training:   8%|▊         | 77/974 [00:53<08:27,  1.77it/s]Training:   8%|▊         | 78/974 [00:54<10:38,  1.40it/s]Training:   8%|▊         | 79/974 [00:54<09:01,  1.65it/s]Training:   8%|▊         | 80/974 [00:55<08:31,  1.75it/s]Training:   8%|▊         | 81/974 [00:55<07:27,  2.00it/s]Training:   8%|▊         | 82/974 [00:55<06:51,  2.17it/s]Training:   9%|▊         | 83/974 [00:56<08:15,  1.80it/s]Training:   9%|▊         | 84/974 [00:57<08:17,  1.79it/s]Training:   9%|▊         | 85/974 [00:57<08:05,  1.83it/s]Training:   9%|▉         | 86/974 [00:58<08:07,  1.82it/s]Training:   9%|▉         | 87/974 [00:59<08:33,  1.73it/s]Training:   9%|▉         | 88/974 [00:59<08:09,  1.81it/s]Training:   9%|▉         | 89/974 [01:00<08:10,  1.80it/s]Training:   9%|▉         | 90/974 [01:00<07:58,  1.85it/s]Training:   9%|▉         | 91/974 [01:01<07:27,  1.97it/s]Training:   9%|▉         | 92/974 [01:01<07:44,  1.90it/s]Training:  10%|▉         | 93/974 [01:02<07:28,  1.96it/s]Training:  10%|▉         | 94/974 [01:02<07:33,  1.94it/s]Training:  10%|▉         | 95/974 [01:04<15:28,  1.06s/it]Training:  10%|▉         | 96/974 [01:05<12:53,  1.13it/s]Training:  10%|▉         | 97/974 [01:05<11:18,  1.29it/s]Training:  10%|█         | 98/974 [01:06<10:34,  1.38it/s]Training:  10%|█         | 99/974 [01:06<08:48,  1.65it/s]Training:  10%|█         | 100/974 [01:07<10:58,  1.33it/s]Training:  10%|█         | 101/974 [01:08<09:19,  1.56it/s]Training:  10%|█         | 102/974 [01:08<08:15,  1.76it/s]Training:  11%|█         | 103/974 [01:09<08:22,  1.73it/s]Training:  11%|█         | 104/974 [01:09<07:44,  1.87it/s]Training:  11%|█         | 105/974 [01:10<07:30,  1.93it/s]Training:  11%|█         | 106/974 [01:10<07:23,  1.96it/s]Training:  11%|█         | 107/974 [01:11<07:51,  1.84it/s]Training:  11%|█         | 108/974 [01:11<06:49,  2.11it/s]Training:  11%|█         | 109/974 [01:11<06:15,  2.30it/s]Training:  11%|█▏        | 110/974 [01:13<09:05,  1.58it/s]Training:  11%|█▏        | 111/974 [01:13<08:51,  1.62it/s]Training:  11%|█▏        | 112/974 [01:13<07:41,  1.87it/s]Training:  12%|█▏        | 113/974 [01:14<08:20,  1.72it/s]Training:  12%|█▏        | 114/974 [01:15<07:28,  1.92it/s]Training:  12%|█▏        | 115/974 [01:15<06:53,  2.08it/s]Training:  12%|█▏        | 116/974 [01:15<06:37,  2.16it/s]Training:  12%|█▏        | 116/974 [01:16<09:23,  1.52it/s]
+  Batch 0: Grad norm before clip = 0.825323
+  Batch 50: Grad norm before clip = 0.808973
+  Batch 100: Grad norm before clip = 0.388284
+Traceback (most recent call last):
+  File "/personal/RNA-3E-FFI/scripts/04_train_model.py", line 1001, in <module>
+    main()
+  File "/personal/RNA-3E-FFI/scripts/04_train_model.py", line 848, in main
+    train_metrics = train_epoch(
+                    ^^^^^^^^^^^^
+  File "/personal/RNA-3E-FFI/scripts/04_train_model.py", line 274, in train_epoch
+    pocket_embedding = model(batch)
+                       ^^^^^^^^^^^^
+  File "/opt/mamba/envs/RNA/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1736, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/mamba/envs/RNA/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1747, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/personal/RNA-3E-FFI/models/e3_gnn_encoder_v2.py", line 892, in forward
+    h_nonbonded = self.nonbonded_mp_layers[i](
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/mamba/envs/RNA/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1736, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/mamba/envs/RNA/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1747, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/personal/RNA-3E-FFI/models/e3_gnn_encoder_v2.py", line 346, in forward
+    x_message = self.propagate(edge_index, x=x, pos=pos, edge_attr=edge_attr)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/tmp/models.e3_gnn_encoder_v2_E3GNNMessagePassingLayer_propagate_0g43e9uv.py", line 228, in propagate
+    out = self.message(
+          ^^^^^^^^^^^^^
+  File "/personal/RNA-3E-FFI/models/e3_gnn_encoder_v2.py", line 414, in message
+    tp_weights = self.radial_mlp(radial_input)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/mamba/envs/RNA/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1736, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/mamba/envs/RNA/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1747, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/mamba/envs/RNA/lib/python3.11/site-packages/torch/nn/modules/container.py", line 250, in forward
+    input = module(input)
+            ^^^^^^^^^^^^^
+  File "/opt/mamba/envs/RNA/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1736, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/mamba/envs/RNA/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1747, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/mamba/envs/RNA/lib/python3.11/site-packages/torch/nn/modules/linear.py", line 125, in forward
+    return F.linear(input, self.weight, self.bias)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 13.31 GiB. GPU 0 has a total capacity of 44.53 GiB of which 11.12 GiB is free. Process 1866979 has 33.40 GiB memory in use. Of the allocated memory 32.91 GiB is allocated by PyTorch, and 155.03 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+
+Training completed!
