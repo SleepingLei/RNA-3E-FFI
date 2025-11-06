@@ -27,8 +27,7 @@ from functools import partial
 import glob
 import ast
 
-# Import AMBER vocabulary utilities
-from amber_vocabulary import get_global_encoder
+# AMBER vocabulary removed - using pure physical features now
 
 
 def build_graph_from_files(rna_pdb_path, prmtop_path, distance_cutoff=5.0, add_nonbonded_edges=True):
@@ -61,26 +60,24 @@ def build_graph_from_files(rna_pdb_path, prmtop_path, distance_cutoff=5.0, add_n
             return None
 
         # ========================================
-        # 1. NODE FEATURES (AMBER-based with fixed vocabulary)
+        # 1. NODE FEATURES (Pure Physical Features)
         # ========================================
-
-        # Use global encoder with fixed vocabularies
-        encoder = get_global_encoder()
+        # New feature vector: [CHARGE, ATOMIC_NUMBER, MASS]
+        # All continuous physical properties - no embeddings needed
 
         node_features = []
         for atom in amber_parm.atoms:
-            # Encode all features using fixed vocabulary
-            features = encoder.encode_atom_features(
-                atom_type=atom.type,
-                charge=float(atom.charge),
-                residue_name=atom.residue.name,
-                atomic_number=atom.atomic_number
-            )
+            # Extract pure physical features
+            charge = float(atom.charge)
+            atomic_number = int(atom.atomic_number)
+            mass = float(atom.mass)  # Atomic mass from AMBER topology
+
+            features = [charge, atomic_number, mass]
             node_features.append(features)
 
-        # Convert to numpy first (avoids warning)
+        # Convert to tensor
         node_features_array = np.array(node_features, dtype=np.float32)
-        x = torch.from_numpy(node_features_array)
+        x = torch.from_numpy(node_features_array)  # Shape: [num_atoms, 3]
 
         # ========================================
         # 2. NODE POSITIONS (only from INPCRD)
@@ -665,37 +662,30 @@ def build_and_save_graphs(hariboss_csv, pocket_dir, amber_dir, output_dir, dista
             print(f"Collected features from {len(all_node_features)} graphs")
             print(f"Total atoms: {all_features.shape[0]}, Feature dim: {all_features.shape[1]}")
 
-            # Feature vector: [atom_type_idx, charge, residue_idx, atomic_num]
-            # Only normalize continuous features (indices 1 and 3)
-            # DO NOT normalize discrete indices (0 and 2)
+            # Feature vector: [charge, atomic_num, mass]
+            # All features are continuous physical properties - normalize all
 
-            continuous_indices = [1, 3]  # charge and atomic_num
-
-            # Compute statistics only for continuous features
-            feature_mean = np.zeros(all_features.shape[1])
-            feature_std = np.ones(all_features.shape[1])
-
-            feature_mean[continuous_indices] = np.mean(all_features[:, continuous_indices], axis=0)
-            feature_std[continuous_indices] = np.std(all_features[:, continuous_indices], axis=0)
+            # Compute statistics for all features
+            feature_mean = np.mean(all_features, axis=0)
+            feature_std = np.std(all_features, axis=0)
 
             # Add small epsilon to avoid division by zero
-            feature_std[continuous_indices] = np.where(
-                feature_std[continuous_indices] < 1e-8,
+            feature_std = np.where(
+                feature_std < 1e-8,
                 1.0,
-                feature_std[continuous_indices]
+                feature_std
             )
 
-            print(f"\nNormalization parameters (only for continuous features):")
-            print(f"  Charge (idx 1): mean={feature_mean[1]:.4f}, std={feature_std[1]:.4f}")
-            print(f"  Atomic num (idx 3): mean={feature_mean[3]:.4f}, std={feature_std[3]:.4f}")
-            print(f"  Note: Discrete indices (0=atom_type, 2=residue) are NOT normalized")
+            print(f"\nNormalization parameters (all features are continuous):")
+            print(f"  Charge (idx 0): mean={feature_mean[0]:.4f}, std={feature_std[0]:.4f}")
+            print(f"  Atomic num (idx 1): mean={feature_mean[1]:.4f}, std={feature_std[1]:.4f}")
+            print(f"  Mass (idx 2): mean={feature_mean[2]:.4f}, std={feature_std[2]:.4f}")
 
             # Save normalization parameters
             norm_params_path = output_dir.parent / "node_feature_norm_params.npz"
             np.savez(norm_params_path,
                      mean=feature_mean,
-                     std=feature_std,
-                     continuous_indices=continuous_indices)
+                     std=feature_std)
             print(f"Saved normalization parameters to {norm_params_path}")
 
             # Apply normalization to all graphs and resave
@@ -704,11 +694,9 @@ def build_and_save_graphs(hariboss_csv, pocket_dir, amber_dir, output_dir, dista
                 try:
                     data = torch.load(graph_path)
                     if hasattr(data, 'x') and data.x is not None:
-                        # Apply normalization only to continuous features
+                        # Apply normalization to all features (all continuous now)
                         x_normalized = data.x.numpy().copy()
-                        x_normalized[:, continuous_indices] = (
-                            x_normalized[:, continuous_indices] - feature_mean[continuous_indices]
-                        ) / feature_std[continuous_indices]
+                        x_normalized = (x_normalized - feature_mean) / feature_std
                         data.x = torch.from_numpy(x_normalized.astype(np.float32))
                         # Save normalized graph
                         torch.save(data, graph_path)

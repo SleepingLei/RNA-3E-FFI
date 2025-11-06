@@ -31,15 +31,15 @@ import warnings
 
 # Add models directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from scripts.amber_vocabulary import get_global_encoder
+# AMBER vocabulary removed - using pure physical features
 
 
 class LigandEmbeddingDataset(torch.utils.data.Dataset):
     """
     Dataset that loads pre-computed graphs and ligand embeddings.
 
-    v2.0 changes:
-    - Validates that graphs use 4-dimensional input features
+    v2.0 (Pure Physical Features) changes:
+    - Validates that graphs use 3-dimensional input features [charge, atomic_num, mass]
     - Checks for multi-hop indices (triple_index, quadra_index)
     - Checks for non-bonded edges
     """
@@ -90,10 +90,10 @@ class LigandEmbeddingDataset(torch.utils.data.Dataset):
                     try:
                         data = torch.load(graph_path)
 
-                        # Check input feature dimension (should be 4 for v2.0)
-                        if data.x.shape[1] != 4:
+                        # Check input feature dimension (should be 3 for pure physical features)
+                        if data.x.shape[1] != 3:
                             format_warnings.append(
-                                f"{complex_id}: Expected 4D features, got {data.x.shape[1]}D"
+                                f"{complex_id}: Expected 3D features [charge, atomic_num, mass], got {data.x.shape[1]}D"
                             )
                             continue
 
@@ -439,11 +439,11 @@ def main():
     parser.add_argument("--splits_file", type=str, default="data/splits/splits.json",
                         help="Path to save/load dataset splits")
 
-    # Model arguments (v2.0)
-    parser.add_argument("--atom_embed_dim", type=int, default=32,
-                        help="Embedding dimension for atom types")
-    parser.add_argument("--residue_embed_dim", type=int, default=16,
-                        help="Embedding dimension for residues")
+    # Model arguments (v2.0 - Pure Physical Features)
+    parser.add_argument("--input_dim", type=int, default=3,
+                        help="Input feature dimension (3: charge, atomic_num, mass)")
+    parser.add_argument("--feature_hidden_dim", type=int, default=64,
+                        help="Hidden dimension for feature embedding MLP")
     parser.add_argument("--hidden_irreps", type=str, default="32x0e + 16x1o + 8x2e",
                         help="Hidden layer irreps")
     parser.add_argument("--output_dim", type=int, default=1536,
@@ -676,8 +676,8 @@ def main():
         persistent_workers=False
     )
 
-    # Initialize model (v2.0)
-    print("\nInitializing v2.0 model...")
+    # Initialize model (v2.0 - Pure Physical Features)
+    print("\nInitializing v2.0 model (Pure Physical Features)...")
 
     # Import appropriate model class based on weight constraints flag
     if args.use_weight_constraints:
@@ -687,15 +687,11 @@ def main():
         from models.e3_gnn_encoder_v2 import RNAPocketEncoderV2 as ModelClass
         print("Using RNAPocketEncoderV2 (standard)")
 
-    # Get vocabulary sizes
-    encoder = get_global_encoder()
-    print(f"Vocabulary sizes: {encoder.num_atom_types} atom types, {encoder.num_residues} residues")
+    print(f"Input features: 3D physical properties [charge, atomic_num, mass]")
 
     model = ModelClass(
-        num_atom_types=encoder.num_atom_types,
-        num_residues=encoder.num_residues,
-        atom_embed_dim=args.atom_embed_dim,
-        residue_embed_dim=args.residue_embed_dim,
+        input_dim=args.input_dim,
+        feature_hidden_dim=args.feature_hidden_dim,
         hidden_irreps=args.hidden_irreps,
         output_dim=args.output_dim,
         num_layers=args.num_layers,

@@ -27,10 +27,6 @@ from e3nn.o3 import Irreps, Linear, FullyConnectedTensorProduct
 import sys
 from pathlib import Path
 
-# Add scripts to path for encoder access
-sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
-from amber_vocabulary import get_global_encoder
-
 # Import improved components
 try:
     from .layers import (
@@ -49,81 +45,57 @@ except ImportError:
 
 
 # ============================================================================
-# Input Embedding Module
+# Input Embedding Module (Pure Physical Features)
 # ============================================================================
 
-class AMBERFeatureEmbedding(nn.Module):
+class PhysicalFeatureEmbedding(nn.Module):
     """
-    Embedding module for AMBER-based node features.
+    Embedding module for pure physical node features.
 
-    Input: [atom_type_idx, charge, residue_idx, atomic_num] (4-dim)
+    Input: [charge, atomic_num, mass] (3-dim, all continuous)
     Output: Equivariant irreps features
 
     Strategy:
-    1. Embed discrete features (atom_type_idx, residue_idx) using nn.Embedding
-    2. Process continuous features (charge, atomic_num) with linear layers
-    3. Fuse all features into scalar irreps
-    4. Project to target irreps
+    1. Process all continuous physical features with MLP
+    2. Project to scalar irreps
+    3. Project scalars to target irreps (with higher-order terms)
+
+    No embeddings or learned vocabularies - pure physics-based features.
     """
 
     def __init__(
         self,
-        num_atom_types,
-        num_residues,
-        atom_embed_dim=32,
-        residue_embed_dim=16,
-        continuous_dim=16,
+        input_dim=3,  # [charge, atomic_num, mass]
+        hidden_dim=64,
         output_irreps="32x0e + 16x1o + 8x2e"
     ):
         """
         Args:
-            num_atom_types: Size of atom type vocabulary
-            num_residues: Size of residue vocabulary
-            atom_embed_dim: Embedding dimension for atom types
-            residue_embed_dim: Embedding dimension for residues
-            continuous_dim: Dimension for continuous features projection
+            input_dim: Number of input features (default 3: charge, atomic_num, mass)
+            hidden_dim: Hidden dimension for MLP
             output_irreps: Target irreps for output
         """
         super().__init__()
 
-        self.num_atom_types = num_atom_types
-        self.num_residues = num_residues
+        self.input_dim = input_dim
         self.output_irreps = o3.Irreps(output_irreps)
-
-        # Embedding layers for discrete features (0-indexed, including UNK)
-        self.atom_type_embedding = nn.Embedding(
-            num_embeddings=num_atom_types,  # Includes UNK token
-            embedding_dim=atom_embed_dim
-        )
-
-        self.residue_embedding = nn.Embedding(
-            num_embeddings=num_residues,  # Includes UNK token
-            embedding_dim=residue_embed_dim
-        )
-
-        # Linear projection for continuous features
-        self.continuous_projection = nn.Sequential(
-            nn.Linear(2, continuous_dim),  # [charge, atomic_num]
-            nn.SiLU(),
-            nn.Linear(continuous_dim, continuous_dim)
-        )
-
-        # Feature fusion
-        fusion_input_dim = atom_embed_dim + residue_embed_dim + continuous_dim
 
         # Extract scalar dimension from output irreps
         scalar_irreps = o3.Irreps([(mul, ir) for mul, ir in self.output_irreps if ir.l == 0])
         self.scalar_dim = scalar_irreps.dim
 
-        # Fuse to scalar features first
-        self.feature_fusion = nn.Sequential(
-            nn.Linear(fusion_input_dim, self.scalar_dim * 2),
+        # MLP to process physical features
+        self.feature_mlp = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
             nn.SiLU(),
-            nn.LayerNorm(self.scalar_dim * 2),
-            nn.Linear(self.scalar_dim * 2, self.scalar_dim)
+            nn.LayerNorm(hidden_dim),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.SiLU(),
+            nn.LayerNorm(hidden_dim),
+            nn.Linear(hidden_dim, self.scalar_dim)
         )
 
-        # Project scalars to full irreps
+        # Project scalars to full irreps (including higher-order terms)
         scalar_irreps_str = f"{self.scalar_dim}x0e"
         self.irreps_projection = o3.Linear(
             irreps_in=o3.Irreps(scalar_irreps_str),
@@ -137,34 +109,18 @@ class AMBERFeatureEmbedding(nn.Module):
         Forward pass.
 
         Args:
-            x: Node features [num_atoms, 4]
-               x[:, 0] = atom_type_idx (int, 0-indexed, 0-68 normal, 69 UNK)
-               x[:, 1] = charge (float)
-               x[:, 2] = residue_idx (int, 0-indexed, 0-41 normal, 42 UNK)
-               x[:, 3] = atomic_num (int)
+            x: Node features [num_atoms, 3]
+               x[:, 0] = charge (float, normalized)
+               x[:, 1] = atomic_num (float, normalized)
+               x[:, 2] = mass (float, normalized)
 
         Returns:
             Embedded features [num_atoms, output_irreps_dim]
         """
-        # Extract features
-        atom_type_idx = x[:, 0].long()  # [num_atoms]
-        charge = x[:, 1:2]              # [num_atoms, 1]
-        residue_idx = x[:, 2].long()    # [num_atoms]
-        atomic_num = x[:, 3:4]          # [num_atoms, 1]
+        # Process physical features through MLP
+        scalar_features = self.feature_mlp(x)  # [num_atoms, scalar_dim]
 
-        # Embed discrete features
-        atom_embed = self.atom_type_embedding(atom_type_idx)  # [num_atoms, atom_embed_dim]
-        residue_embed = self.residue_embedding(residue_idx)   # [num_atoms, residue_embed_dim]
-
-        # Process continuous features
-        continuous_features = torch.cat([charge, atomic_num], dim=-1)  # [num_atoms, 2]
-        continuous_embed = self.continuous_projection(continuous_features)  # [num_atoms, continuous_dim]
-
-        # Fuse all features
-        fused = torch.cat([atom_embed, residue_embed, continuous_embed], dim=-1)
-        scalar_features = self.feature_fusion(fused)  # [num_atoms, scalar_dim]
-
-        # Project to irreps
+        # Project to full irreps
         output = self.irreps_projection(scalar_features)  # [num_atoms, output_irreps_dim]
 
         return output
@@ -584,21 +540,20 @@ class DihedralMessagePassing(nn.Module):
 
 class RNAPocketEncoderV2(nn.Module):
     """
-    E(3) Equivariant GNN for RNA binding pockets - Version 2.0
+    E(3) Equivariant GNN for RNA binding pockets - Version 2.0 (Pure Physical Features)
 
     Complete implementation with:
-    - Embedding-based input features
+    - Pure physical input features (charge, atomic_num, mass)
     - Multi-hop message passing (1-hop bonds, 2-hop angles, 3-hop dihedrals)
     - Non-bonded interactions with LJ parameters
-    - Physical parameter integration
+    - Physical parameter integration throughout
+    - No learned vocabularies or embeddings - physics only
     """
 
     def __init__(
         self,
-        num_atom_types=71,  # AMBER vocabulary size + 1 for <UNK>
-        num_residues=43,    # RNA residue vocabulary size + 1 for <UNK>
-        atom_embed_dim=32,
-        residue_embed_dim=16,
+        input_dim=3,  # [charge, atomic_num, mass]
+        feature_hidden_dim=64,  # Hidden dim for feature MLP
         hidden_irreps="32x0e + 16x1o + 8x2e",
         output_dim=512,
         num_layers=4,
@@ -616,10 +571,8 @@ class RNAPocketEncoderV2(nn.Module):
     ):
         """
         Args:
-            num_atom_types: Size of atom type vocabulary
-            num_residues: Size of residue vocabulary
-            atom_embed_dim: Embedding dimension for atom types
-            residue_embed_dim: Embedding dimension for residues
+            input_dim: Number of input features (3: charge, atomic_num, mass)
+            feature_hidden_dim: Hidden dimension for feature embedding MLP
             hidden_irreps: Hidden layer irreps
             output_dim: Final pocket embedding dimension
             num_layers: Number of message passing layers
@@ -653,13 +606,10 @@ class RNAPocketEncoderV2(nn.Module):
         if use_nonbonded:
             self.nonbonded_weight = nn.Parameter(torch.tensor(0.333))
 
-        # Input embedding
-        self.input_embedding = AMBERFeatureEmbedding(
-            num_atom_types=num_atom_types,
-            num_residues=num_residues,
-            atom_embed_dim=atom_embed_dim,
-            residue_embed_dim=residue_embed_dim,
-            continuous_dim=16,
+        # Input embedding (pure physical features)
+        self.input_embedding = PhysicalFeatureEmbedding(
+            input_dim=input_dim,
+            hidden_dim=feature_hidden_dim,
             output_irreps=hidden_irreps
         )
 
@@ -842,16 +792,16 @@ class RNAPocketEncoderV2(nn.Module):
 
         Args:
             data: PyTorch Geometric Data object with:
-                - x: Node features [num_atoms, 4]
+                - x: Node features [num_atoms, 3] (charge, atomic_num, mass - normalized)
                 - pos: Node positions [num_atoms, 3]
                 - edge_index: Bonded edges [2, num_bonds]
-                - edge_attr: Bond parameters [num_bonds, 2]
+                - edge_attr: Bond parameters [num_bonds, 2] (force_constant, equil_value)
                 - triple_index: Angle paths [3, num_angles] (optional)
-                - triple_attr: Angle parameters [num_angles, 2] (optional)
+                - triple_attr: Angle parameters [num_angles, 2] (force_constant, equil_value)
                 - quadra_index: Dihedral paths [4, num_dihedrals] (optional)
-                - quadra_attr: Dihedral parameters [num_dihedrals, 3] (optional)
+                - quadra_attr: Dihedral parameters [num_dihedrals, 3] (force_constant, periodicity, phase)
                 - nonbonded_edge_index: Non-bonded edges [2, num_nb] (optional)
-                - nonbonded_edge_attr: LJ parameters [num_nb, 3] (optional)
+                - nonbonded_edge_attr: LJ parameters [num_nb, 3] (LJ_ACOEF, LJ_BCOEF, distance)
                 - batch: Batch indices [num_atoms] (optional)
 
         Returns:
@@ -996,11 +946,8 @@ if __name__ == "__main__":
     from torch_geometric.data import Data, Batch
 
     print("=" * 80)
-    print("Testing E(3) GNN Encoder v2.0")
+    print("Testing E(3) GNN Encoder v2.0 (Pure Physical Features)")
     print("=" * 80)
-
-    # Get encoder for vocabulary sizes
-    encoder = get_global_encoder()
 
     # Create dummy data matching v2.0 format
     num_nodes = 100
@@ -1009,33 +956,33 @@ if __name__ == "__main__":
     num_dihedrals = 80
     num_nonbonded = 200
 
-    # Create realistic test data (0-indexed)
-    x = torch.zeros(num_nodes, 4)
-    x[:, 0] = torch.randint(0, encoder.num_atom_types, (num_nodes,)).float()  # atom_type_idx (0-indexed)
-    x[:, 1] = torch.randn(num_nodes) * 0.5  # charge
-    x[:, 2] = torch.randint(0, encoder.num_residues, (num_nodes,)).float()  # residue_idx (0-indexed)
-    x[:, 3] = torch.randint(1, 20, (num_nodes,)).float()  # atomic_num (1-19 common elements)
+    # Create realistic test data with pure physical features
+    # x: [charge, atomic_num, mass] - all continuous, normalized
+    x = torch.zeros(num_nodes, 3)
+    x[:, 0] = torch.randn(num_nodes) * 0.3  # charge (normalized)
+    x[:, 1] = torch.randn(num_nodes) * 0.5  # atomic_num (normalized)
+    x[:, 2] = torch.randn(num_nodes) * 0.5  # mass (normalized)
 
     data = Data(
         x=x,
         pos=torch.randn(num_nodes, 3),
         edge_index=torch.randint(0, num_nodes, (2, num_edges)),
-        edge_attr=torch.randn(num_edges, 2).abs() + 0.1,  # [req, k] positive values
+        edge_attr=torch.randn(num_edges, 2).abs() + 0.1,  # [force_const, equil_value] positive
         triple_index=torch.randint(0, num_nodes, (3, num_angles)),
-        triple_attr=torch.randn(num_angles, 2).abs() + 0.1,  # [theta_eq, k] positive
+        triple_attr=torch.randn(num_angles, 2).abs() + 0.1,  # [force_const, equil_value] positive
         quadra_index=torch.randint(0, num_nodes, (4, num_dihedrals)),
-        quadra_attr=torch.randn(num_dihedrals, 3),  # [phi_k, per, phase]
+        quadra_attr=torch.randn(num_dihedrals, 3),  # [force_const, periodicity, phase]
         nonbonded_edge_index=torch.randint(0, num_nodes, (2, num_nonbonded)),
         nonbonded_edge_attr=torch.cat([
-            torch.randn(num_nonbonded, 2).abs(),  # LJ_A, LJ_B positive
+            torch.randn(num_nonbonded, 2).abs(),  # LJ_ACOEF, LJ_BCOEF positive
             torch.rand(num_nonbonded, 1) * 6.0  # distance 0-6 Angstroms
         ], dim=-1)
     )
 
     # Create model
     model = RNAPocketEncoderV2(
-        num_atom_types=encoder.num_atom_types,
-        num_residues=encoder.num_residues,
+        input_dim=3,
+        feature_hidden_dim=64,
         hidden_irreps="32x0e + 16x1o + 8x2e",
         output_dim=512,
         num_layers=3,
@@ -1048,7 +995,7 @@ if __name__ == "__main__":
 
     # Forward pass
     output = model(data)
-    print(f"\nInput shape: {data.x.shape}")
+    print(f"\nInput shape: {data.x.shape} (charge, atomic_num, mass)")
     print(f"Output shape: {output.shape}")
     print(f"Model has {sum(p.numel() for p in model.parameters()):,} parameters")
 
@@ -1059,5 +1006,5 @@ if __name__ == "__main__":
     print(f"Batched output shape: {output_batch.shape}")
 
     print("\n" + "=" * 80)
-    print("✓ All tests passed!")
+    print("✓ All tests passed! (Pure physical features)")
     print("=" * 80)

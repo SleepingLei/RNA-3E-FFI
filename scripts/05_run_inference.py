@@ -18,7 +18,7 @@ from tqdm import tqdm
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from models.e3_gnn_encoder_v2 import RNAPocketEncoderV2
-from scripts.amber_vocabulary import get_global_encoder
+# AMBER vocabulary removed - using pure physical features
 
 
 def load_model(checkpoint_path, device):
@@ -50,7 +50,7 @@ def load_model(checkpoint_path, device):
         with open(config_json_path, 'r') as f:
             file_config = json.load(f)
             # Merge configs, preferring file config for model architecture params
-            for key in ['atom_embed_dim', 'residue_embed_dim', 'hidden_irreps',
+            for key in ['input_dim', 'feature_hidden_dim', 'hidden_irreps',
                        'output_dim', 'num_layers', 'use_multi_hop', 'use_nonbonded',
                        'pooling_type', 'use_layer_norm', 'dropout']:
                 if key in file_config:
@@ -59,15 +59,10 @@ def load_model(checkpoint_path, device):
         raise ValueError("Checkpoint does not contain model configuration and no config.json found. "
                        "Please use a checkpoint saved with v2 training script.")
 
-    # Get encoder for vocabulary sizes
-    encoder = get_global_encoder()
-
-    # Initialize model with config from checkpoint
+    # Initialize model with config from checkpoint (Pure Physical Features)
     model = RNAPocketEncoderV2(
-        num_atom_types=encoder.num_atom_types,
-        num_residues=encoder.num_residues,
-        atom_embed_dim=config.get('atom_embed_dim', 32),
-        residue_embed_dim=config.get('residue_embed_dim', 16),
+        input_dim=config.get('input_dim', 3),
+        feature_hidden_dim=config.get('feature_hidden_dim', 64),
         hidden_irreps=config.get('hidden_irreps', '32x0e + 16x1o + 8x2e'),
         output_dim=config.get('output_dim', 512),
         num_layers=config.get('num_layers', 4),
