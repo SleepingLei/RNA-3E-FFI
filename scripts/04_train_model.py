@@ -245,9 +245,9 @@ def compute_loss(pred, target, loss_fn='cosine', cosine_weight=0.7, mse_weight=0
 
 def train_epoch(model, loader, optimizer, device, loss_fn='cosine',
                 cosine_weight=0.7, mse_weight=0.3, temperature=0.07,
-                grad_clip=0.0, monitor_gradients=False):
+                grad_clip=0.0, monitor_gradients=False, accumulation_steps=1):
     """
-    Train for one epoch.
+    Train for one epoch with gradient accumulation support.
 
     Args:
         model: The model to train
@@ -258,6 +258,7 @@ def train_epoch(model, loader, optimizer, device, loss_fn='cosine',
         cosine_weight: Weight for cosine loss in cosine_mse mode
         mse_weight: Weight for MSE loss in cosine_mse mode
         temperature: Temperature for InfoNCE loss
+        accumulation_steps: Number of steps to accumulate gradients before updating
 
     Returns:
         Dictionary with training metrics including loss and learnable weights
@@ -266,6 +267,9 @@ def train_epoch(model, loader, optimizer, device, loss_fn='cosine',
     total_loss = 0
     num_batches = 0
     accumulated_metrics = {}
+
+    # Zero gradients at the start
+    optimizer.zero_grad()
 
     for batch_idx, batch in enumerate(tqdm(loader, desc="Training")):
         batch = batch.to(device)
@@ -289,40 +293,46 @@ def train_epoch(model, loader, optimizer, device, loss_fn='cosine',
             temperature=temperature
         )
 
-        # Backward pass
-        optimizer.zero_grad()
+        # Scale loss by accumulation steps (to get the correct average)
+        loss = loss / accumulation_steps
+
+        # Backward pass (accumulate gradients)
         loss.backward()
 
-        # Compute gradient norm before clipping (for monitoring)
-        if monitor_gradients and batch_idx % 50 == 0:
-            total_grad_norm = 0
-            for p in model.parameters():
-                if p.grad is not None:
-                    total_grad_norm += p.grad.norm().item() ** 2
-            total_grad_norm = total_grad_norm ** 0.5
-            print(f"  Batch {batch_idx}: Grad norm before clip = {total_grad_norm:.6f}")
+        # Only update weights every accumulation_steps
+        if (batch_idx + 1) % accumulation_steps == 0 or (batch_idx + 1) == len(loader):
+            # Compute gradient norm before clipping (for monitoring)
+            if monitor_gradients and batch_idx % 50 == 0:
+                total_grad_norm = 0
+                for p in model.parameters():
+                    if p.grad is not None:
+                        total_grad_norm += p.grad.norm().item() ** 2
+                total_grad_norm = total_grad_norm ** 0.5
+                print(f"  Batch {batch_idx}: Grad norm before clip = {total_grad_norm:.6f}")
 
-        # Optional: Gradient clipping for stability
-        # Note: For cosine loss, gradients are naturally smaller than MSE
-        if grad_clip > 0:
-            # Use user-specified clipping value
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=grad_clip)
-        else:
-            # Use automatic defaults based on loss function
-            if loss_fn == 'infonce':
-                # InfoNCE can have larger gradients due to softmax
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
-            elif loss_fn == 'cosine':
-                # Cosine loss has smaller gradients, use higher threshold
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)
+            # Optional: Gradient clipping for stability
+            # Note: For cosine loss, gradients are naturally smaller than MSE
+            if grad_clip > 0:
+                # Use user-specified clipping value
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=grad_clip)
             else:
-                # MSE and combined losses
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
+                # Use automatic defaults based on loss function
+                if loss_fn == 'infonce':
+                    # InfoNCE can have larger gradients due to softmax
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
+                elif loss_fn == 'cosine':
+                    # Cosine loss has smaller gradients, use higher threshold
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)
+                else:
+                    # MSE and combined losses
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
 
-        optimizer.step()
+            # Update weights
+            optimizer.step()
+            optimizer.zero_grad()
 
-        # Accumulate metrics
-        total_loss += loss.item()
+        # Accumulate metrics (use unscaled loss for reporting)
+        total_loss += loss.item() * accumulation_steps
         num_batches += 1
 
         for key, value in batch_metrics.items():
@@ -503,6 +513,8 @@ def main():
                         help="Gradient clipping max norm (0 to use automatic per-loss defaults)")
     parser.add_argument("--monitor_gradients", action="store_true", default=False,
                         help="Print gradient statistics during training for debugging")
+    parser.add_argument("--accumulation_steps", type=int, default=1,
+                        help="Number of gradient accumulation steps (effective batch size = batch_size * accumulation_steps)")
 
     # Splitting arguments
     parser.add_argument("--train_ratio", type=float, default=0.8,
@@ -794,19 +806,31 @@ def main():
         'nonbonded_weight': []
     }
 
-    # Print loss function configuration
+    # Print training configuration
     print("\n" + "="*60)
-    print("Loss Function Configuration")
+    print("Training Configuration")
     print("="*60)
-    print(f"Loss Function: {args.loss_fn}")
+
+    # Batch size and gradient accumulation
+    effective_batch_size = args.batch_size * args.accumulation_steps
+    print(f"Batch Size: {args.batch_size}")
+    if args.accumulation_steps > 1:
+        print(f"Gradient Accumulation Steps: {args.accumulation_steps}")
+        print(f"Effective Batch Size: {effective_batch_size}")
+        print(f"  💡 This simulates batch_size={effective_batch_size} without extra GPU memory")
+    else:
+        print(f"Gradient Accumulation: Disabled")
+
+    # Loss function configuration
+    print(f"\nLoss Function: {args.loss_fn}")
     if args.loss_fn == 'cosine_mse':
         print(f"  Cosine weight: {args.cosine_weight}")
         print(f"  MSE weight: {args.mse_weight}")
     elif args.loss_fn == 'infonce':
         print(f"  Temperature: {args.temperature}")
         print(f"  ⚠️  Note: InfoNCE requires batch_size >= 16 for effective negative sampling")
-        if args.batch_size < 16:
-            print(f"  ⚠️  Warning: Current batch_size={args.batch_size} may be too small for InfoNCE")
+        if effective_batch_size < 16:
+            print(f"  ⚠️  Warning: Current effective_batch_size={effective_batch_size} may be too small for InfoNCE")
 
     # Print gradient clipping configuration
     if args.grad_clip > 0:
@@ -824,9 +848,10 @@ def main():
         print("Gradient Monitoring: ENABLED (will print every 50 batches)")
 
     # Batch size warning for cosine loss
-    if args.loss_fn == 'cosine' and args.batch_size < 4:
-        print(f"\n⚠️  Warning: batch_size={args.batch_size} is very small for cosine loss")
-        print("   Consider using batch_size >= 8 for more stable training")
+    if args.loss_fn == 'cosine' and effective_batch_size < 4:
+        print(f"\n⚠️  Warning: effective_batch_size={effective_batch_size} is very small for cosine loss")
+        print("   Consider using effective_batch_size >= 8 for more stable training")
+        print(f"   You can increase --accumulation_steps to achieve this")
 
     print("="*60)
 
@@ -848,7 +873,8 @@ def main():
             mse_weight=args.mse_weight,
             temperature=args.temperature,
             grad_clip=args.grad_clip,
-            monitor_gradients=args.monitor_gradients
+            monitor_gradients=args.monitor_gradients,
+            accumulation_steps=args.accumulation_steps
         )
         train_loss = train_metrics['loss']
 
