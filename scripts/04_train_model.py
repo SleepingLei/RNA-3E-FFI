@@ -35,6 +35,9 @@ import torch.multiprocessing as mp
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler
 
+# For mixed precision training
+from torch.cuda.amp import autocast, GradScaler
+
 # Add models directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 # AMBER vocabulary removed - using pure physical features
@@ -274,9 +277,10 @@ def compute_loss(pred, target, loss_fn='cosine', cosine_weight=0.7, mse_weight=0
 
 def train_epoch(model, loader, optimizer, device, loss_fn='cosine',
                 cosine_weight=0.7, mse_weight=0.3, temperature=0.07,
-                grad_clip=0.0, monitor_gradients=False, accumulation_steps=1):
+                grad_clip=0.0, monitor_gradients=False, accumulation_steps=1,
+                use_amp=False, scaler=None):
     """
-    Train for one epoch with gradient accumulation support.
+    Train for one epoch with gradient accumulation and mixed precision support.
 
     Args:
         model: The model to train
@@ -288,6 +292,8 @@ def train_epoch(model, loader, optimizer, device, loss_fn='cosine',
         mse_weight: Weight for MSE loss in cosine_mse mode
         temperature: Temperature for InfoNCE loss
         accumulation_steps: Number of steps to accumulate gradients before updating
+        use_amp: Whether to use automatic mixed precision
+        scaler: GradScaler for mixed precision training
 
     Returns:
         Dictionary with training metrics including loss and learnable weights
@@ -303,30 +309,34 @@ def train_epoch(model, loader, optimizer, device, loss_fn='cosine',
     for batch_idx, batch in enumerate(tqdm(loader, desc="Training")):
         batch = batch.to(device)
 
-        # Forward pass
-        pocket_embedding = model(batch)
-        target_embedding = batch.y
+        # Forward pass with mixed precision
+        with autocast(enabled=use_amp):
+            pocket_embedding = model(batch)
+            target_embedding = batch.y
 
-        # Reshape target if needed (PyG DataLoader flattens batch.y)
-        # Expected: [batch_size, embedding_dim]
-        if target_embedding.dim() == 1:
-            batch_size = batch.num_graphs if hasattr(batch, 'num_graphs') else pocket_embedding.size(0)
-            target_embedding = target_embedding.view(batch_size, -1)
+            # Reshape target if needed (PyG DataLoader flattens batch.y)
+            # Expected: [batch_size, embedding_dim]
+            if target_embedding.dim() == 1:
+                batch_size = batch.num_graphs if hasattr(batch, 'num_graphs') else pocket_embedding.size(0)
+                target_embedding = target_embedding.view(batch_size, -1)
 
-        # Compute loss using specified loss function
-        loss, batch_metrics = compute_loss(
-            pocket_embedding, target_embedding,
-            loss_fn=loss_fn,
-            cosine_weight=cosine_weight,
-            mse_weight=mse_weight,
-            temperature=temperature
-        )
+            # Compute loss using specified loss function
+            loss, batch_metrics = compute_loss(
+                pocket_embedding, target_embedding,
+                loss_fn=loss_fn,
+                cosine_weight=cosine_weight,
+                mse_weight=mse_weight,
+                temperature=temperature
+            )
 
-        # Scale loss by accumulation steps (to get the correct average)
-        loss = loss / accumulation_steps
+            # Scale loss by accumulation steps (to get the correct average)
+            loss = loss / accumulation_steps
 
-        # Backward pass (accumulate gradients)
-        loss.backward()
+        # Backward pass (accumulate gradients) with mixed precision
+        if use_amp:
+            scaler.scale(loss).backward()
+        else:
+            loss.backward()
 
         # Only update weights every accumulation_steps
         if (batch_idx + 1) % accumulation_steps == 0 or (batch_idx + 1) == len(loader):
@@ -341,6 +351,10 @@ def train_epoch(model, loader, optimizer, device, loss_fn='cosine',
 
             # Optional: Gradient clipping for stability
             # Note: For cosine loss, gradients are naturally smaller than MSE
+            if use_amp:
+                # Unscale gradients for clipping with AMP
+                scaler.unscale_(optimizer)
+
             if grad_clip > 0:
                 # Use user-specified clipping value
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=grad_clip)
@@ -356,8 +370,12 @@ def train_epoch(model, loader, optimizer, device, loss_fn='cosine',
                     # MSE and combined losses
                     torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
 
-            # Update weights
-            optimizer.step()
+            # Update weights with AMP support
+            if use_amp:
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                optimizer.step()
             optimizer.zero_grad()
 
         # Accumulate metrics (use unscaled loss for reporting)
@@ -396,9 +414,9 @@ def train_epoch(model, loader, optimizer, device, loss_fn='cosine',
 
 
 def evaluate(model, loader, device, loss_fn='cosine',
-             cosine_weight=0.7, mse_weight=0.3, temperature=0.07):
+             cosine_weight=0.7, mse_weight=0.3, temperature=0.07, use_amp=False):
     """
-    Evaluate model on validation/test set.
+    Evaluate model on validation/test set with mixed precision support.
 
     Args:
         model: The model to evaluate
@@ -408,6 +426,7 @@ def evaluate(model, loader, device, loss_fn='cosine',
         cosine_weight: Weight for cosine loss in cosine_mse mode
         mse_weight: Weight for MSE loss in cosine_mse mode
         temperature: Temperature for InfoNCE loss
+        use_amp: Whether to use automatic mixed precision
 
     Returns:
         Dictionary with evaluation metrics
@@ -421,24 +440,25 @@ def evaluate(model, loader, device, loss_fn='cosine',
         for batch_idx, batch in enumerate(tqdm(loader, desc="Evaluating")):
             batch = batch.to(device)
 
-            # Forward pass
-            pocket_embedding = model(batch)
-            target_embedding = batch.y
+            # Forward pass with mixed precision
+            with autocast(enabled=use_amp):
+                pocket_embedding = model(batch)
+                target_embedding = batch.y
 
-            # Reshape target if needed (PyG DataLoader flattens batch.y)
-            # Expected: [batch_size, embedding_dim]
-            if target_embedding.dim() == 1:
-                batch_size = batch.num_graphs if hasattr(batch, 'num_graphs') else pocket_embedding.size(0)
-                target_embedding = target_embedding.view(batch_size, -1)
+                # Reshape target if needed (PyG DataLoader flattens batch.y)
+                # Expected: [batch_size, embedding_dim]
+                if target_embedding.dim() == 1:
+                    batch_size = batch.num_graphs if hasattr(batch, 'num_graphs') else pocket_embedding.size(0)
+                    target_embedding = target_embedding.view(batch_size, -1)
 
-            # Compute loss using specified loss function
-            loss, batch_metrics = compute_loss(
-                pocket_embedding, target_embedding,
-                loss_fn=loss_fn,
-                cosine_weight=cosine_weight,
-                mse_weight=mse_weight,
-                temperature=temperature
-            )
+                # Compute loss using specified loss function
+                loss, batch_metrics = compute_loss(
+                    pocket_embedding, target_embedding,
+                    loss_fn=loss_fn,
+                    cosine_weight=cosine_weight,
+                    mse_weight=mse_weight,
+                    temperature=temperature
+                )
 
             total_loss += loss.item()
             num_batches += 1
@@ -773,6 +793,9 @@ def train_worker(rank, world_size, args):
             verbose=is_main_process
         )
 
+    # Initialize GradScaler for mixed precision training
+    scaler = GradScaler() if args.use_amp else None
+
     # Load checkpoint if resuming
     start_epoch = 1
     best_val_loss = float('inf')
@@ -847,6 +870,12 @@ def train_worker(rank, world_size, args):
         if args.accumulation_steps > 1:
             print(f"  💡 This simulates batch_size={effective_batch_size} without extra GPU memory")
 
+        # Mixed precision training
+        print(f"\nMixed Precision Training (AMP): {'Enabled' if args.use_amp else 'Disabled'}")
+        if args.use_amp:
+            print(f"  ⚡ Using float16 for forward/backward pass (~50% memory reduction)")
+            print(f"  💡 This can significantly reduce GPU memory usage")
+
         # Loss function configuration
         print(f"\nLoss Function: {args.loss_fn}")
         if args.loss_fn == 'cosine_mse':
@@ -907,7 +936,9 @@ def train_worker(rank, world_size, args):
             temperature=args.temperature,
             grad_clip=args.grad_clip,
             monitor_gradients=args.monitor_gradients,
-            accumulation_steps=args.accumulation_steps
+            accumulation_steps=args.accumulation_steps,
+            use_amp=args.use_amp,
+            scaler=scaler
         )
         train_loss = train_metrics['loss']
 
@@ -937,7 +968,8 @@ def train_worker(rank, world_size, args):
             loss_fn=args.loss_fn,
             cosine_weight=args.cosine_weight,
             mse_weight=args.mse_weight,
-            temperature=args.temperature
+            temperature=args.temperature,
+            use_amp=args.use_amp
         )
         val_loss = val_metrics['loss']
 
@@ -1149,6 +1181,8 @@ def main():
                         help="Print gradient statistics during training for debugging")
     parser.add_argument("--accumulation_steps", type=int, default=1,
                         help="Number of gradient accumulation steps (effective batch size = batch_size * accumulation_steps)")
+    parser.add_argument("--use_amp", action="store_true", default=False,
+                        help="Use Automatic Mixed Precision (AMP) training for reduced memory usage (~50% less)")
 
     # Splitting arguments
     parser.add_argument("--train_ratio", type=float, default=0.8,
