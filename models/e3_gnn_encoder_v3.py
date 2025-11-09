@@ -55,6 +55,60 @@ except ImportError:
     warnings.warn("Could not import improved_components. Make sure it's in the same directory.")
 
 
+class EquivariantLayerNorm(nn.Module):
+    """
+    E(3)-equivariant LayerNorm - 只对标量特征 (l=0) 做归一化
+    高阶特征 (l=1, l=2) 保持不变以维持等变性
+
+    用于稳定多跳消息传递的聚合特征，防止特征幅值爆炸
+    """
+    def __init__(self, irreps):
+        super().__init__()
+        self.irreps = o3.Irreps(irreps)
+
+        # 找到所有标量特征的位置
+        self.scalar_indices = []
+        idx = 0
+        for mul, ir in self.irreps:
+            if ir.l == 0:
+                # 标量特征
+                for _ in range(mul):
+                    self.scalar_indices.append(idx)
+                    idx += ir.dim
+            else:
+                idx += mul * ir.dim
+
+        # 为标量特征创建 LayerNorm
+        if len(self.scalar_indices) > 0:
+            self.layer_norm = nn.LayerNorm(len(self.scalar_indices))
+        else:
+            self.layer_norm = None
+
+    def forward(self, x):
+        """
+        Args:
+            x: [num_atoms, irreps_dim]
+
+        Returns:
+            x_norm: [num_atoms, irreps_dim] - 标量部分归一化，向量/张量部分不变
+        """
+        if self.layer_norm is None or len(self.scalar_indices) == 0:
+            return x
+
+        x_norm = x.clone()
+
+        # 提取标量特征
+        scalar_features = x[:, self.scalar_indices]  # [num_atoms, num_scalars]
+
+        # 归一化
+        scalar_features_norm = self.layer_norm(scalar_features)
+
+        # 放回
+        x_norm[:, self.scalar_indices] = scalar_features_norm
+
+        return x_norm
+
+
 class RNAPocketEncoderV3(nn.Module):
     """
     E(3) Equivariant GNN for RNA binding pockets - Version 3.0 (Improved)
@@ -217,6 +271,14 @@ class RNAPocketEncoderV3(nn.Module):
                 )
                 self.nonbonded_mp_layers.append(layer)
 
+        # LayerNorm for stabilizing multi-hop aggregation (防止特征幅值爆炸)
+        if use_multi_hop or use_nonbonded:
+            self.aggregation_layer_norms = nn.ModuleList()
+            for i in range(num_layers):
+                self.aggregation_layer_norms.append(
+                    EquivariantLayerNorm(self.hidden_irreps)
+                )
+
         # Invariant feature extraction (IMPROVED!)
         if use_enhanced_invariants:
             # 使用增强版本: 206维（带归一化稳定性改进）
@@ -368,7 +430,11 @@ class RNAPocketEncoderV3(nn.Module):
                 )
                 h_new = h_new + self.nonbonded_weight * h_nonbonded
 
-            h = h_new
+            # Apply LayerNorm to stabilize aggregated features (防止幅值爆炸)
+            if (self.use_multi_hop or self.use_nonbonded) and hasattr(self, 'aggregation_layer_norms'):
+                h = self.aggregation_layer_norms[i](h_new)
+            else:
+                h = h_new
 
             # Dropout on scalars only
             if self.dropout > 0 and self.training:

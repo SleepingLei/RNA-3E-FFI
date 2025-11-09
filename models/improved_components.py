@@ -408,7 +408,7 @@ class EnhancedInvariantExtractor(nn.Module):
         for start, end in self.irreps_slices['l1']:
             vec = h[:, start:end]  # [num_atoms, 3]
             vectors.append(vec)
-            norm = torch.linalg.norm(vec, dim=-1, keepdim=True)  # [num_atoms, 1]
+            norm = torch.linalg.norm(vec, dim=-1, keepdim=True).clamp(min=1e-6)  # [num_atoms, 1]
             vector_norms.append(norm)
 
         if vector_norms:
@@ -421,7 +421,7 @@ class EnhancedInvariantExtractor(nn.Module):
         for start, end in self.irreps_slices['l2']:
             tensor = h[:, start:end]  # [num_atoms, 5]
             tensors.append(tensor)
-            norm = torch.linalg.norm(tensor, dim=-1, keepdim=True)  # [num_atoms, 1]
+            norm = torch.linalg.norm(tensor, dim=-1, keepdim=True).clamp(min=1e-6)  # [num_atoms, 1]
             tensor_norms.append(norm)
 
         if tensor_norms:

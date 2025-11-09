@@ -383,16 +383,17 @@ def train_epoch(model, loader, optimizer, device, loss_fn='cosine',
                 # Use user-specified clipping value
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=grad_clip)
             else:
-                # Use automatic defaults based on loss function
+                # V3 model uses stricter gradient clipping (206-dim invariants + multi-hop MP)
+                # Lower thresholds than V2 to handle increased model complexity
                 if loss_fn == 'infonce':
-                    # InfoNCE can have larger gradients due to softmax
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
+                    # InfoNCE: 2.0 (was 5.0 for V2)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=2.0)
                 elif loss_fn == 'cosine':
-                    # Cosine loss has smaller gradients, use higher threshold
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)
+                    # Cosine: 1.5 (was 10.0 for V2)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.5)
                 else:
-                    # MSE and combined losses
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
+                    # MSE and combined: 2.0 (was 5.0 for V2)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=2.0)
 
             # Update weights with AMP support
             if use_amp:
