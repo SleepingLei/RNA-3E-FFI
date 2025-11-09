@@ -42,13 +42,16 @@ from torch.cuda.amp import autocast, GradScaler
 sys.path.insert(0, str(Path(__file__).parent.parent))
 # AMBER vocabulary removed - using pure physical features
 
-# Import physics constraint loss (V3 improvement)
+# Import V3 improvements
 try:
     from models.improved_components import PhysicsConstraintLoss
+    from models.e3_gnn_encoder_v3 import RNAPocketEncoderV3
+    _has_v3_model = True
     _has_physics_loss = True
 except ImportError:
+    _has_v3_model = False
     _has_physics_loss = False
-    warnings.warn("PhysicsConstraintLoss not available. Install improved_components.py to use physics constraints.")
+    warnings.warn("V3 improvements not available. Using V2 model only.")
 
 
 def setup_ddp(rank, world_size):
@@ -728,37 +731,72 @@ def train_worker(rank, world_size, args):
             persistent_workers=False
         )
 
-    # Initialize model (v2.0 - Pure Physical Features)
+    # Initialize model (v2.0 or v3.0)
     if is_main_process:
-        print("\nInitializing v2.0 model (Pure Physical Features)...")
+        if args.use_v3_model and _has_v3_model:
+            print("\nInitializing v3.0 model (with V3 improvements)...")
+        else:
+            print("\nInitializing v2.0 model (Pure Physical Features)...")
 
-    # Import appropriate model class based on weight constraints flag
-    if args.use_weight_constraints:
-        from models.e3_gnn_encoder_v2_fixed import RNAPocketEncoderV2Fixed as ModelClass
+    # Select model class based on version and constraints
+    if args.use_v3_model and _has_v3_model:
+        # Use V3 model with improvements
+        ModelClass = RNAPocketEncoderV3
         if is_main_process:
-            print("Using RNAPocketEncoderV2Fixed (with weight constraints)")
+            print("Using RNAPocketEncoderV3 (geometric MP + enhanced invariants + multi-head attention)")
+            print(f"  Geometric MP: {args.use_geometric_mp}")
+            print(f"  Enhanced invariants: {args.use_enhanced_invariants} (206-dim vs 56-dim)")
+            print(f"  Attention heads: {args.num_attention_heads}")
+
+        # V3-specific pooling type override
+        v3_pooling_type = 'multihead_attention' if args.num_attention_heads > 1 else args.pooling_type
+
+        model = ModelClass(
+            input_dim=args.input_dim,
+            feature_hidden_dim=args.feature_hidden_dim,
+            hidden_irreps=args.hidden_irreps,
+            output_dim=args.output_dim,
+            num_layers=args.num_layers,
+            num_radial_basis=args.num_radial_basis,
+            use_multi_hop=args.use_multi_hop,
+            use_nonbonded=args.use_nonbonded,
+            use_gate=args.use_gate,
+            use_layer_norm=args.use_layer_norm,
+            pooling_type=v3_pooling_type,
+            dropout=args.dropout,
+            # V3-specific parameters
+            use_geometric_mp=args.use_geometric_mp,
+            use_enhanced_invariants=args.use_enhanced_invariants,
+            num_attention_heads=args.num_attention_heads
+        )
     else:
-        from models.e3_gnn_encoder_v2 import RNAPocketEncoderV2 as ModelClass
+        # Use V2 model (backward compatible)
+        if args.use_weight_constraints:
+            from models.e3_gnn_encoder_v2_fixed import RNAPocketEncoderV2Fixed as ModelClass
+            if is_main_process:
+                print("Using RNAPocketEncoderV2Fixed (with weight constraints)")
+        else:
+            from models.e3_gnn_encoder_v2 import RNAPocketEncoderV2 as ModelClass
+            if is_main_process:
+                print("Using RNAPocketEncoderV2 (standard)")
+
         if is_main_process:
-            print("Using RNAPocketEncoderV2 (standard)")
+            print(f"Input features: 3D physical properties [charge, atomic_num, mass]")
 
-    if is_main_process:
-        print(f"Input features: 3D physical properties [charge, atomic_num, mass]")
-
-    model = ModelClass(
-        input_dim=args.input_dim,
-        feature_hidden_dim=args.feature_hidden_dim,
-        hidden_irreps=args.hidden_irreps,
-        output_dim=args.output_dim,
-        num_layers=args.num_layers,
-        num_radial_basis=args.num_radial_basis,
-        use_multi_hop=args.use_multi_hop,
-        use_nonbonded=args.use_nonbonded,
-        use_gate=args.use_gate,
-        use_layer_norm=args.use_layer_norm,
-        pooling_type=args.pooling_type,
-        dropout=args.dropout
-    )
+        model = ModelClass(
+            input_dim=args.input_dim,
+            feature_hidden_dim=args.feature_hidden_dim,
+            hidden_irreps=args.hidden_irreps,
+            output_dim=args.output_dim,
+            num_layers=args.num_layers,
+            num_radial_basis=args.num_radial_basis,
+            use_multi_hop=args.use_multi_hop,
+            use_nonbonded=args.use_nonbonded,
+            use_gate=args.use_gate,
+            use_layer_norm=args.use_layer_norm,
+            pooling_type=args.pooling_type,
+            dropout=args.dropout
+        )
 
     model = model.to(device)
 
@@ -1194,6 +1232,16 @@ def main():
                         help="Graph pooling type")
     parser.add_argument("--dropout", type=float, default=0.10,
                         help="Dropout rate")
+
+    # V3 model arguments (advanced improvements)
+    parser.add_argument("--use_v3_model", action="store_true", default=False,
+                        help="Use V3 model with geometric MP, enhanced invariants, and multi-head attention")
+    parser.add_argument("--use_geometric_mp", action="store_true", default=True,
+                        help="Use geometric angle/dihedral message passing (V3 only)")
+    parser.add_argument("--use_enhanced_invariants", action="store_true", default=True,
+                        help="Use enhanced invariant feature extraction 206-dim (V3 only)")
+    parser.add_argument("--num_attention_heads", type=int, default=4,
+                        help="Number of attention heads for pooling (V3 only, default: 4)")
 
     # Training arguments
     parser.add_argument("--loss_fn", type=str, default="cosine",
