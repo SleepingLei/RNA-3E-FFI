@@ -1199,7 +1199,7 @@ def main():
                         help="Directory containing graph files")
     parser.add_argument("--embeddings_path", type=str, default="data/processed/ligand_embeddings.h5",
                         help="Path to ligand embeddings HDF5 file")
-    parser.add_argument("--splits_file", type=str, default="data/splits/splits.json",
+    parser.add_argument("--splits_file", type=str, default="data/splits/filtered_splits.json",
                         help="Path to save/load dataset splits")
 
     # Model arguments (v2.0 - Pure Physical Features)
@@ -1258,9 +1258,9 @@ def main():
                         help="Batch size")
     parser.add_argument("--num_epochs", type=int, default=300,
                         help="Number of training epochs")
-    parser.add_argument("--lr", type=float, default=1e-3,
+    parser.add_argument("--lr", type=float, default=2e-4,
                         help="Learning rate")
-    parser.add_argument("--weight_decay", type=float, default=5e-6,
+    parser.add_argument("--weight_decay", type=float, default=1e-6,
                         help="Weight decay")
     parser.add_argument("--optimizer", type=str, default="adamw",
                         choices=["adam", "adamw"],

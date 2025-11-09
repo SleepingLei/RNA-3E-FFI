@@ -19,7 +19,7 @@ set -e  # Exit on error
 CHECKPOINT="${CHECKPOINT:-models/checkpoints_mse_1536_6_dropout_0.1_retry/best_model.pt}"
 GRAPH_DIR="${GRAPH_DIR:-data/processed/graphs}"
 LIGAND_EMBEDDINGS="${LIGAND_EMBEDDINGS:-data/processed/ligand_embeddings_dedup.h5}"
-OUTPUT_DIR="${OUTPUT_DIR:-results/embedding_analysis_retry}"
+OUTPUT_DIR="${OUTPUT_DIR:-results/embedding_analysis_retry_train}"
 
 # Visualization methods (pca tsne umap)
 METHODS="${METHODS:-pca tsne}"

@@ -11,8 +11,8 @@ python scripts/filter_large_samples.py \
     --graph_dir data/processed/graphs \
     --splits_file data/splits/splits.json \
     --output_splits data/splits/filtered_splits.json \
-    --percentile 95 \
-    --output_dir data/analysis
+    --percentile 98 \
+    --output_dir data/processed/graphs_filtered
 
 # Option 2: Aggressive filtering (removes top 1%)
 # Uncomment if you still get OOM after Option 1
@@ -34,7 +34,7 @@ echo "Filtering completed!"
 echo "=========================================="
 echo ""
 echo "Next steps:"
-echo "1. Check the analysis results in data/analysis/"
+echo "1. Check the analysis results in data/"
 echo "2. Run training with filtered dataset:"
 echo "   bash scripts/train_physics_amp.sh"
 echo ""
