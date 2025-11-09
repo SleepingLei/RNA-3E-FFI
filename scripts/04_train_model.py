@@ -42,6 +42,14 @@ from torch.cuda.amp import autocast, GradScaler
 sys.path.insert(0, str(Path(__file__).parent.parent))
 # AMBER vocabulary removed - using pure physical features
 
+# Import physics constraint loss (V3 improvement)
+try:
+    from models.improved_components import PhysicsConstraintLoss
+    _has_physics_loss = True
+except ImportError:
+    _has_physics_loss = False
+    warnings.warn("PhysicsConstraintLoss not available. Install improved_components.py to use physics constraints.")
+
 
 def setup_ddp(rank, world_size):
     """
@@ -278,7 +286,7 @@ def compute_loss(pred, target, loss_fn='cosine', cosine_weight=0.7, mse_weight=0
 def train_epoch(model, loader, optimizer, device, loss_fn='cosine',
                 cosine_weight=0.7, mse_weight=0.3, temperature=0.07,
                 grad_clip=0.0, monitor_gradients=False, accumulation_steps=1,
-                use_amp=False, scaler=None):
+                use_amp=False, scaler=None, physics_loss_fn=None, physics_weight=0.1):
     """
     Train for one epoch with gradient accumulation and mixed precision support.
 
@@ -294,6 +302,8 @@ def train_epoch(model, loader, optimizer, device, loss_fn='cosine',
         accumulation_steps: Number of steps to accumulate gradients before updating
         use_amp: Whether to use automatic mixed precision
         scaler: GradScaler for mixed precision training
+        physics_loss_fn: PhysicsConstraintLoss function (optional, V3 improvement)
+        physics_weight: Weight for physics constraint loss
 
     Returns:
         Dictionary with training metrics including loss and learnable weights
@@ -320,7 +330,7 @@ def train_epoch(model, loader, optimizer, device, loss_fn='cosine',
                 batch_size = batch.num_graphs if hasattr(batch, 'num_graphs') else pocket_embedding.size(0)
                 target_embedding = target_embedding.view(batch_size, -1)
 
-            # Compute loss using specified loss function
+            # Compute main task loss using specified loss function
             loss, batch_metrics = compute_loss(
                 pocket_embedding, target_embedding,
                 loss_fn=loss_fn,
@@ -328,6 +338,17 @@ def train_epoch(model, loader, optimizer, device, loss_fn='cosine',
                 mse_weight=mse_weight,
                 temperature=temperature
             )
+
+            # Add physics constraint loss if enabled (V3 improvement)
+            if physics_loss_fn is not None:
+                physics_loss, physics_dict = physics_loss_fn(batch)
+                # Add physics loss with weight
+                loss = loss + physics_weight * physics_loss
+                # Track physics metrics
+                batch_metrics['physics_loss'] = physics_loss.item()
+                batch_metrics['physics_weight'] = physics_weight
+                for key, val in physics_dict.items():
+                    batch_metrics[key] = val
 
             # Scale loss by accumulation steps (to get the correct average)
             loss = loss / accumulation_steps
@@ -912,6 +933,24 @@ def train_worker(rank, world_size, args):
         print("="*60)
         print("\nStarting training...\n")
 
+    # Initialize physics constraint loss if enabled (V3 improvement)
+    physics_loss_fn = None
+    if args.use_physics_loss and _has_physics_loss:
+        physics_loss_fn = PhysicsConstraintLoss(
+            use_bond=args.physics_use_bond,
+            use_angle=args.physics_use_angle,
+            use_dihedral=args.physics_use_dihedral,
+            use_nonbonded=args.physics_use_nonbonded
+        ).to(device)
+        if is_main_process:
+            print("\nPhysics Constraint Loss (V3 Improvement): ENABLED")
+            print(f"  Physics weight: {args.physics_weight}")
+            print(f"  Bond energy: {'✓' if args.physics_use_bond else '✗'}")
+            print(f"  Angle energy: {'✓' if args.physics_use_angle else '✗'}")
+            print(f"  Dihedral energy: {'✓' if args.physics_use_dihedral else '✗'}")
+            print(f"  Non-bonded energy: {'✓' if args.physics_use_nonbonded else '✗'}")
+            print("="*60)
+
     # Training loop
     for epoch in range(start_epoch, args.num_epochs + 1):
         if is_main_process:
@@ -938,7 +977,9 @@ def train_worker(rank, world_size, args):
             monitor_gradients=args.monitor_gradients,
             accumulation_steps=args.accumulation_steps,
             use_amp=args.use_amp,
-            scaler=scaler
+            scaler=scaler,
+            physics_loss_fn=physics_loss_fn,
+            physics_weight=args.physics_weight
         )
         train_loss = train_metrics['loss']
 
@@ -950,6 +991,14 @@ def train_worker(rank, world_size, args):
             if 'infonce_accuracy' in train_metrics:
                 train_str += f", InfoNCE Acc: {train_metrics['infonce_accuracy']*100:.2f}%"
             print(train_str)
+
+            # Print physics constraint loss metrics if available (V3 improvement)
+            if 'physics_loss' in train_metrics:
+                print(f"  Physics Loss: {train_metrics['physics_loss']:.6f} (weight: {train_metrics['physics_weight']:.3f})")
+                if 'bond_energy' in train_metrics:
+                    print(f"    Bond: {train_metrics['bond_energy']:.4f}, Angle: {train_metrics['angle_energy']:.4f}, Dihedral: {train_metrics['dihedral_energy']:.4f}")
+                if 'nonbonded_energy' in train_metrics:
+                    print(f"    Non-bonded: {train_metrics['nonbonded_energy']:.4f}")
 
             # Print learnable weights if available
             if 'angle_weight' in train_metrics:
@@ -1183,6 +1232,20 @@ def main():
                         help="Number of gradient accumulation steps (effective batch size = batch_size * accumulation_steps)")
     parser.add_argument("--use_amp", action="store_true", default=False,
                         help="Use Automatic Mixed Precision (AMP) training for reduced memory usage (~50% less)")
+
+    # Physics constraint arguments (V3 improvement)
+    parser.add_argument("--use_physics_loss", action="store_true", default=False,
+                        help="Enable physics constraint loss (bond/angle/dihedral energies)")
+    parser.add_argument("--physics_weight", type=float, default=0.1,
+                        help="Weight for physics constraint loss (default: 0.1)")
+    parser.add_argument("--physics_use_bond", action="store_true", default=True,
+                        help="Include bond stretching energy in physics loss")
+    parser.add_argument("--physics_use_angle", action="store_true", default=True,
+                        help="Include angle bending energy in physics loss")
+    parser.add_argument("--physics_use_dihedral", action="store_true", default=True,
+                        help="Include dihedral torsion energy in physics loss")
+    parser.add_argument("--physics_use_nonbonded", action="store_true", default=False,
+                        help="Include non-bonded (LJ) energy in physics loss (expensive, usually not needed)")
 
     # Splitting arguments
     parser.add_argument("--train_ratio", type=float, default=0.8,
