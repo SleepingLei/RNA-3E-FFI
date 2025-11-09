@@ -102,7 +102,12 @@ class GeometricAngleMessagePassing(nn.Module):
         x_i = x_scalar[i]  # [num_angles, scalar_dim]
         x_k = x_scalar[k]  # [num_angles, scalar_dim]
 
-        # Concatenate features and parameters
+        # triple_attr 已在数据预处理中归一化：
+        # triple_attr[:, 0]: theta_eq / 180.0 (度数归一化，范围 [0, ~2])
+        # triple_attr[:, 1]: k / 200.0 (力常数归一化，范围 [0, ~1])
+        # 无需重复归一化，直接使用
+
+        # Concatenate features and parameters (已归一化)
         angle_input = [x_i, x_k, triple_attr]
 
         # 计算几何特征（旋转不变量）
@@ -117,16 +122,19 @@ class GeometricAngleMessagePassing(nn.Module):
             norm_ji = torch.linalg.norm(vec_ji, dim=-1).clamp(min=1e-6)
             norm_jk = torch.linalg.norm(vec_jk, dim=-1).clamp(min=1e-6)
             cos_angle = dot_product / (norm_ji * norm_jk)  # [num_angles]
-            cos_angle = torch.clamp(cos_angle, -1.0, 1.0)  # 数值稳定性
+            cos_angle = torch.clamp(cos_angle, -1.0, 1.0)  # 已在 [-1, 1]
 
             # 计算角度偏差（相对于平衡角度）
-            # triple_attr[:, 0] 是平衡角度 theta_eq (已经是弧度)
-            cos_eq = torch.cos(triple_attr[:, 0])  # [num_angles]
-            angle_deviation = cos_angle - cos_eq  # [num_angles]
+            # 注意：triple_attr[:, 0] 是度数归一化的，需要转换为弧度
+            theta_eq_radians = triple_attr[:, 0] * math.pi  # 转换为弧度
+            cos_eq = torch.cos(theta_eq_radians)  # [num_angles]
+            angle_deviation = cos_angle - cos_eq  # [num_angles]，范围 [-2, 2]
+            # 归一化到 [-1, 1]
+            angle_deviation_norm = angle_deviation / 2.0
 
-            # 添加几何特征
-            angle_input.append(cos_angle.unsqueeze(-1))      # [num_angles, 1]
-            angle_input.append(angle_deviation.unsqueeze(-1))  # [num_angles, 1]
+            # 添加几何特征（都已归一化到合理范围）
+            angle_input.append(cos_angle.unsqueeze(-1))              # [-1, 1]
+            angle_input.append(angle_deviation_norm.unsqueeze(-1))   # [-1, 1]
 
         angle_input = torch.cat(angle_input, dim=-1)
 
@@ -266,16 +274,23 @@ class GeometricDihedralMessagePassing(nn.Module):
         x_i = x_scalar[i]  # [num_dihedrals, scalar_dim]
         x_l = x_scalar[l]  # [num_dihedrals, scalar_dim]
 
-        # Concatenate features and parameters
+        # quadra_attr 已在数据预处理中归一化：
+        # quadra_attr[:, 0]: phi_k / 20.0 (势垒高度，范围 [0, ~1])
+        # quadra_attr[:, 1]: per / 6.0 (周期性，范围 [0, 1])
+        # quadra_attr[:, 2]: phase / (2π) (相位归一化，范围 [0, 1])
+        # 无需重复归一化，直接使用
+
+        # Concatenate features and parameters (已归一化)
         dihedral_input = [x_i, x_l, quadra_attr]
 
         # 计算几何特征（旋转不变量）
         if self.use_geometry:
             cos_dihedral, sin_dihedral = self.compute_dihedral_angle(pos, quadra_index)
+            # cos_dihedral 和 sin_dihedral 已经在 [-1, 1] 范围内
 
-            # 添加几何特征
-            dihedral_input.append(cos_dihedral.unsqueeze(-1))  # [num_dihedrals, 1]
-            dihedral_input.append(sin_dihedral.unsqueeze(-1))  # [num_dihedrals, 1]
+            # 添加几何特征（已在合理范围）
+            dihedral_input.append(cos_dihedral.unsqueeze(-1))  # [-1, 1]
+            dihedral_input.append(sin_dihedral.unsqueeze(-1))  # [-1, 1]
 
         dihedral_input = torch.cat(dihedral_input, dim=-1)
 
@@ -508,7 +523,7 @@ class PhysicsConstraintLoss(nn.Module):
         Args:
             pos: [N, 3]
             edge_index: [2, E]
-            edge_attr: [E, 2] - [k, r_eq]
+            edge_attr: [E, 2] - [req_norm, k_norm] (数据预处理后的归一化参数)
         """
         i, j = edge_index[0], edge_index[1]
 
@@ -516,12 +531,13 @@ class PhysicsConstraintLoss(nn.Module):
         bond_vectors = pos[i] - pos[j]  # [E, 3]
         bond_lengths = torch.linalg.norm(bond_vectors, dim=-1)  # [E]
 
-        # 力常数和平衡键长
-        k = edge_attr[:, 0]      # [E]
-        r_eq = edge_attr[:, 1]   # [E]
+        # 反归一化参数（数据中是 [req/2.0, k/500.0]）
+        r_eq = edge_attr[:, 0] * 2.0      # [E] 反归一化平衡键长
+        k = edge_attr[:, 1] * 500.0       # [E] 反归一化力常数
 
         # 能量: E = k * (r - r_eq)^2
-        energy = k * (bond_lengths - r_eq) ** 2  # [E]
+        # 除以归一化常数以稳定数值（避免能量过大）
+        energy = (k / 500.0) * (bond_lengths - r_eq) ** 2  # [E]
 
         if self.reduction == 'mean':
             return energy.mean()
@@ -537,7 +553,7 @@ class PhysicsConstraintLoss(nn.Module):
         Args:
             pos: [N, 3]
             triple_index: [3, A] - [i, j, k]
-            triple_attr: [A, 2] - [theta_eq (radians), k]
+            triple_attr: [A, 2] - [theta_eq_norm, k_norm] (数据预处理后的归一化参数)
         """
         i, j, k = triple_index[0], triple_index[1], triple_index[2]
 
@@ -555,12 +571,14 @@ class PhysicsConstraintLoss(nn.Module):
         # 计算角度（弧度）
         theta = torch.acos(cos_theta)  # [A]
 
-        # 力常数和平衡角度
-        theta_eq = triple_attr[:, 0]  # [A] 弧度
-        k = triple_attr[:, 1]         # [A]
+        # 反归一化参数（数据中是 [theta_eq/180.0, k/200.0]，theta_eq 是度数）
+        theta_eq_degrees = triple_attr[:, 0] * 180.0  # [A] 反归一化为度数
+        theta_eq = theta_eq_degrees * (math.pi / 180.0)  # [A] 转换为弧度
+        k = triple_attr[:, 1] * 200.0  # [A] 反归一化力常数
 
         # 能量: E = k * (theta - theta_eq)^2
-        energy = k * (theta - theta_eq) ** 2  # [A]
+        # 除以归一化常数以稳定数值
+        energy = (k / 200.0) * (theta - theta_eq) ** 2  # [A]
 
         if self.reduction == 'mean':
             return energy.mean()
@@ -579,7 +597,7 @@ class PhysicsConstraintLoss(nn.Module):
         Args:
             pos: [N, 3]
             quadra_index: [4, D] - [i, j, k, l]
-            quadra_attr: [D, 3] - [phi_k, periodicity, phase (radians)]
+            quadra_attr: [D, 3] - [phi_k_norm, per_norm, phase_norm] (数据预处理后的归一化参数)
         """
         i, j, k, l = quadra_index[0], quadra_index[1], quadra_index[2], quadra_index[3]
 
@@ -611,13 +629,14 @@ class PhysicsConstraintLoss(nn.Module):
         # 计算二面角 phi（使用atan2保证正确的符号）
         phi = torch.atan2(sin_phi, cos_phi)  # [D] 范围 [-pi, pi]
 
-        # 力场参数
-        phi_k = quadra_attr[:, 0]        # [D] 力常数
-        periodicity = quadra_attr[:, 1]  # [D] 周期性 (通常是1, 2, 3等整数)
-        phase = quadra_attr[:, 2]        # [D] 相位 (弧度)
+        # 反归一化参数（数据中是 [phi_k/20.0, per/6.0, phase/(2π)]）
+        phi_k = quadra_attr[:, 0] * 20.0  # [D] 反归一化力常数
+        periodicity = torch.round(quadra_attr[:, 1] * 6.0)  # [D] 反归一化周期性并取整
+        phase = quadra_attr[:, 2] * (2 * math.pi)  # [D] 反归一化相位为弧度
 
         # 能量: E = phi_k * (1 + cos(n*phi - phase))
-        energy = phi_k * (1 + torch.cos(periodicity * phi - phase))  # [D]
+        # 除以归一化常数以稳定数值
+        energy = (phi_k / 20.0) * (1 + torch.cos(periodicity * phi - phase))  # [D]
 
         if self.reduction == 'mean':
             return energy.mean()
@@ -632,6 +651,11 @@ class PhysicsConstraintLoss(nn.Module):
 
         E_LJ = A/r^12 - B/r^6
 
+        Args:
+            pos: [N, 3]
+            nonbonded_edge_index: [2, E]
+            nonbonded_edge_attr: [E, 3] - [log(A+1), log(B+1), dist] (数据预处理后)
+
         注意: 这个通常不用于loss，因为:
         1. 计算量大
         2. 梯度不稳定
@@ -643,14 +667,16 @@ class PhysicsConstraintLoss(nn.Module):
         r_vec = pos[i] - pos[j]
         r = torch.linalg.norm(r_vec, dim=-1).clamp(min=1e-2)  # 避免除零
 
-        # LJ参数
-        A = nonbonded_edge_attr[:, 0]
-        B = nonbonded_edge_attr[:, 1]
+        # 反归一化 LJ 参数（数据中是 log(A+1), log(B+1)）
+        A = torch.exp(nonbonded_edge_attr[:, 0]) - 1.0
+        B = torch.exp(nonbonded_edge_attr[:, 1]) - 1.0
 
-        # LJ能量
-        r6 = r ** 6
+        # LJ 能量，使用 clamp 提高数值稳定性
+        r6 = (r.clamp(min=0.5) ** 6)  # 限制最小距离避免能量爆炸
         r12 = r6 ** 2
-        energy = A / r12 - B / r6
+
+        # 能量计算，限制最大值避免梯度爆炸
+        energy = (A / r12 - B / r6).clamp(max=100.0)  # 限制单个能量项
 
         if self.reduction == 'mean':
             return energy.mean()
