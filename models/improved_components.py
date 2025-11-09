@@ -37,13 +37,15 @@ class GeometricAngleMessagePassing(nn.Module):
         irreps_out,
         angle_attr_dim=2,  # [theta_eq, k]
         hidden_dim=64,
-        use_geometry=True
+        use_geometry=True,
+        use_layer_norm=True  # 添加 LayerNorm 提高稳定性
     ):
         super().__init__()
 
         self.irreps_in = o3.Irreps(irreps_in)
         self.irreps_out = o3.Irreps(irreps_out)
         self.use_geometry = use_geometry
+        self.use_layer_norm = use_layer_norm
 
         # Extract scalar features
         scalar_irreps = o3.Irreps([(mul, ir) for mul, ir in self.irreps_in if ir.l == 0])
@@ -54,6 +56,10 @@ class GeometricAngleMessagePassing(nn.Module):
         input_dim = self.scalar_dim * 2 + angle_attr_dim
         if use_geometry:
             input_dim += 2  # cos_angle + angle_deviation
+
+        # LayerNorm for input stabilization
+        if use_layer_norm:
+            self.input_norm = nn.LayerNorm(input_dim)
 
         # MLP for angle feature processing
         self.angle_mlp = nn.Sequential(
@@ -124,6 +130,10 @@ class GeometricAngleMessagePassing(nn.Module):
 
         angle_input = torch.cat(angle_input, dim=-1)
 
+        # Apply LayerNorm for numerical stability
+        if self.use_layer_norm:
+            angle_input = self.input_norm(angle_input)
+
         # Process through MLP
         angle_messages = self.angle_mlp(angle_input)  # [num_angles, scalar_dim]
 
@@ -155,13 +165,15 @@ class GeometricDihedralMessagePassing(nn.Module):
         irreps_out,
         dihedral_attr_dim=3,  # [phi_k, per, phase]
         hidden_dim=64,
-        use_geometry=True
+        use_geometry=True,
+        use_layer_norm=True  # 添加 LayerNorm 提高稳定性
     ):
         super().__init__()
 
         self.irreps_in = o3.Irreps(irreps_in)
         self.irreps_out = o3.Irreps(irreps_out)
         self.use_geometry = use_geometry
+        self.use_layer_norm = use_layer_norm
 
         # Extract scalar features
         scalar_irreps = o3.Irreps([(mul, ir) for mul, ir in self.irreps_in if ir.l == 0])
@@ -172,6 +184,10 @@ class GeometricDihedralMessagePassing(nn.Module):
         input_dim = self.scalar_dim * 2 + dihedral_attr_dim
         if use_geometry:
             input_dim += 2  # cos_dihedral + sin_dihedral
+
+        # LayerNorm for input stabilization
+        if use_layer_norm:
+            self.input_norm = nn.LayerNorm(input_dim)
 
         # MLP for dihedral feature processing
         self.dihedral_mlp = nn.Sequential(
@@ -263,6 +279,10 @@ class GeometricDihedralMessagePassing(nn.Module):
 
         dihedral_input = torch.cat(dihedral_input, dim=-1)
 
+        # Apply LayerNorm for numerical stability
+        if self.use_layer_norm:
+            dihedral_input = self.input_norm(dihedral_input)
+
         # Process through MLP
         dihedral_messages = self.dihedral_mlp(dihedral_input)  # [num_dihedrals, scalar_dim]
 
@@ -288,16 +308,19 @@ class EnhancedInvariantExtractor(nn.Module):
     包括:
     1. 标量特征（原有）
     2. 向量/张量的L2范数（原有）
-    3. 向量之间的点积（新增，成对交互）
+    3. 向量之间的点积（新增，成对交互）- 归一化处理
     4. 高阶统计量（新增，均值/方差）
 
     所有特征都严格保持E(3)不变性！
+
+    改进: 添加特征归一化以提高数值稳定性
     """
 
-    def __init__(self, hidden_irreps="32x0e + 16x1o + 8x2e"):
+    def __init__(self, hidden_irreps="32x0e + 16x1o + 8x2e", normalize_features=True):
         super().__init__()
 
         self.hidden_irreps = o3.Irreps(hidden_irreps)
+        self.normalize_features = normalize_features
 
         # Build index slices for extracting different irrep types
         self.irreps_slices = {'l0': [], 'l1': [], 'l2': []}
@@ -396,8 +419,16 @@ class EnhancedInvariantExtractor(nn.Module):
             vector_dot_products = []
             for i in range(len(vectors)):
                 for j in range(i + 1, len(vectors)):
-                    # 点积: (v_i · v_j) = sum(v_i * v_j)
-                    dot_prod = (vectors[i] * vectors[j]).sum(dim=-1, keepdim=True)  # [num_atoms, 1]
+                    if self.normalize_features:
+                        # 使用归一化点积（余弦相似度）提高数值稳定性
+                        # cos_sim = (v_i · v_j) / (||v_i|| * ||v_j||)
+                        norm_i = torch.linalg.norm(vectors[i], dim=-1, keepdim=True).clamp(min=1e-6)
+                        norm_j = torch.linalg.norm(vectors[j], dim=-1, keepdim=True).clamp(min=1e-6)
+                        dot_prod = (vectors[i] * vectors[j]).sum(dim=-1, keepdim=True) / (norm_i * norm_j)
+                        dot_prod = torch.clamp(dot_prod, -1.0, 1.0)  # 限制在[-1, 1]
+                    else:
+                        # 原始点积（可能数值较大）
+                        dot_prod = (vectors[i] * vectors[j]).sum(dim=-1, keepdim=True)  # [num_atoms, 1]
                     vector_dot_products.append(dot_prod)
 
             if vector_dot_products:
@@ -409,8 +440,15 @@ class EnhancedInvariantExtractor(nn.Module):
             tensor_dot_products = []
             for i in range(len(tensors)):
                 for j in range(i + 1, len(tensors)):
-                    # 点积: sum(t_i * t_j)
-                    dot_prod = (tensors[i] * tensors[j]).sum(dim=-1, keepdim=True)  # [num_atoms, 1]
+                    if self.normalize_features:
+                        # 使用归一化点积提高数值稳定性
+                        norm_i = torch.linalg.norm(tensors[i], dim=-1, keepdim=True).clamp(min=1e-6)
+                        norm_j = torch.linalg.norm(tensors[j], dim=-1, keepdim=True).clamp(min=1e-6)
+                        dot_prod = (tensors[i] * tensors[j]).sum(dim=-1, keepdim=True) / (norm_i * norm_j)
+                        dot_prod = torch.clamp(dot_prod, -1.0, 1.0)  # 限制在[-1, 1]
+                    else:
+                        # 原始点积
+                        dot_prod = (tensors[i] * tensors[j]).sum(dim=-1, keepdim=True)  # [num_atoms, 1]
                     tensor_dot_products.append(dot_prod)
 
             if tensor_dot_products:

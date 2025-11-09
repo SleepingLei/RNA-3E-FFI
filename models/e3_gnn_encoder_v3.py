@@ -152,13 +152,14 @@ class RNAPocketEncoderV3(nn.Module):
             self.angle_mp_layers = nn.ModuleList()
             for i in range(num_layers):
                 if use_geometric_mp:
-                    # 使用几何增强版本
+                    # 使用几何增强版本（带 LayerNorm 稳定性改进）
                     layer = GeometricAngleMessagePassing(
                         irreps_in=self.hidden_irreps,
                         irreps_out=self.hidden_irreps,
                         angle_attr_dim=2,
                         hidden_dim=64,
-                        use_geometry=True
+                        use_geometry=True,
+                        use_layer_norm=True  # 启用 LayerNorm 提高数值稳定性
                     )
                 else:
                     # 使用原始版本（从v2导入）
@@ -176,13 +177,14 @@ class RNAPocketEncoderV3(nn.Module):
             self.dihedral_mp_layers = nn.ModuleList()
             for i in range(num_layers):
                 if use_geometric_mp:
-                    # 使用几何增强版本
+                    # 使用几何增强版本（带 LayerNorm 稳定性改进）
                     layer = GeometricDihedralMessagePassing(
                         irreps_in=self.hidden_irreps,
                         irreps_out=self.hidden_irreps,
                         dihedral_attr_dim=3,
                         hidden_dim=64,
-                        use_geometry=True
+                        use_geometry=True,
+                        use_layer_norm=True  # 启用 LayerNorm 提高数值稳定性
                     )
                 else:
                     # 使用原始版本
@@ -217,8 +219,11 @@ class RNAPocketEncoderV3(nn.Module):
 
         # Invariant feature extraction (IMPROVED!)
         if use_enhanced_invariants:
-            # 使用增强版本: 206维
-            self.invariant_extractor = EnhancedInvariantExtractor(hidden_irreps)
+            # 使用增强版本: 206维（带归一化稳定性改进）
+            self.invariant_extractor = EnhancedInvariantExtractor(
+                hidden_irreps,
+                normalize_features=True  # 启用特征归一化提高数值稳定性
+            )
             self.invariant_dim = self.invariant_extractor.invariant_dim  # 206
         else:
             # 使用原始版本: 56维
