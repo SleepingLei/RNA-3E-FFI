@@ -52,10 +52,10 @@ class GeometricAngleMessagePassing(nn.Module):
         self.scalar_dim = scalar_irreps.dim
 
         # 输入维度: 节点特征 + 角度参数 + 几何特征(可选)
-        # 几何特征: cos_angle (1) + angle_deviation (1) = 2
+        # 几何特征: cos_angle (1)
         input_dim = self.scalar_dim * 2 + angle_attr_dim
         if use_geometry:
-            input_dim += 2  # cos_angle + angle_deviation
+            input_dim += 1  # cos_angle
 
         # LayerNorm for input stabilization
         if use_layer_norm:
@@ -124,17 +124,8 @@ class GeometricAngleMessagePassing(nn.Module):
             cos_angle = dot_product / (norm_ji * norm_jk)  # [num_angles]
             cos_angle = torch.clamp(cos_angle, -1.0, 1.0)  # 已在 [-1, 1]
 
-            # 计算角度偏差（相对于平衡角度）
-            # 注意：triple_attr[:, 0] 是度数归一化的，需要转换为弧度
-            theta_eq_radians = triple_attr[:, 0] * math.pi  # 转换为弧度
-            cos_eq = torch.cos(theta_eq_radians)  # [num_angles]
-            angle_deviation = cos_angle - cos_eq  # [num_angles]，范围 [-2, 2]
-            # 归一化到 [-1, 1]
-            angle_deviation_norm = angle_deviation / 2.0
-
-            # 添加几何特征（都已归一化到合理范围）
-            angle_input.append(cos_angle.unsqueeze(-1))              # [-1, 1]
-            angle_input.append(angle_deviation_norm.unsqueeze(-1))   # [-1, 1]
+            # 添加几何特征
+            angle_input.append(cos_angle.unsqueeze(-1))  # [-1, 1]
 
         angle_input = torch.cat(angle_input, dim=-1)
 

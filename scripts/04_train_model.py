@@ -365,13 +365,16 @@ def train_epoch(model, loader, optimizer, device, loss_fn='cosine',
         # Only update weights every accumulation_steps
         if (batch_idx + 1) % accumulation_steps == 0 or (batch_idx + 1) == len(loader):
             # Compute gradient norm before clipping (for monitoring)
-            if monitor_gradients and batch_idx % 50 == 0:
-                total_grad_norm = 0
-                for p in model.parameters():
-                    if p.grad is not None:
-                        total_grad_norm += p.grad.norm().item() ** 2
-                total_grad_norm = total_grad_norm ** 0.5
-                print(f"  Batch {batch_idx}: Grad norm before clip = {total_grad_norm:.6f}")
+            if monitor_gradients:
+                # 自适应监控频率: 前100个batch密集监控(每10次)，之后降低频率(每50次)
+                monitor_interval = 10 if batch_idx < 100 else 50
+                if batch_idx % monitor_interval == 0:
+                    total_grad_norm = 0
+                    for p in model.parameters():
+                        if p.grad is not None:
+                            total_grad_norm += p.grad.norm().item() ** 2
+                    total_grad_norm = total_grad_norm ** 0.5
+                    print(f"  Batch {batch_idx}: Grad norm before clip = {total_grad_norm:.6f}")
 
             # Optional: Gradient clipping for stability
             # Note: For cosine loss, gradients are naturally smaller than MSE
@@ -1282,11 +1285,12 @@ def main():
     parser.add_argument("--use_amp", action="store_true", default=False,
                         help="Use Automatic Mixed Precision (AMP) training for reduced memory usage (~50% less)")
 
-    # Physics constraint arguments (V3 improvement)
+    # Physics constraint arguments (V3 improvement) - NOT RECOMMENDED
     parser.add_argument("--use_physics_loss", action="store_true", default=False,
-                        help="Enable physics constraint loss (bond/angle/dihedral energies)")
+                        help="[NOT RECOMMENDED] Enable physics constraint loss (bond/angle/dihedral energies). "
+                             "This adds extra complexity without clear benefits for representation learning.")
     parser.add_argument("--physics_weight", type=float, default=0.1,
-                        help="Weight for physics constraint loss (default: 0.1)")
+                        help="Weight for physics constraint loss (default: 0.1, only used if --use_physics_loss is set)")
     parser.add_argument("--physics_use_bond", action="store_true", default=True,
                         help="Include bond stretching energy in physics loss")
     parser.add_argument("--physics_use_angle", action="store_true", default=True,
