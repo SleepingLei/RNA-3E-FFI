@@ -36,7 +36,11 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler
 
 # For mixed precision training
-from torch.cuda.amp import autocast, GradScaler
+try:
+    from torch.amp import autocast
+    from torch.cuda.amp import GradScaler
+except ImportError:
+    from torch.cuda.amp import autocast, GradScaler
 
 # Add models directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -329,7 +333,7 @@ def train_epoch(model, loader, optimizer, device, loss_fn='cosine',
         batch = batch.to(device)
 
         # Forward pass with mixed precision
-        with autocast(enabled=use_amp):
+        with autocast(device_type='cuda', enabled=use_amp):
             pocket_embedding = model(batch)
             target_embedding = batch.y
 
@@ -503,7 +507,7 @@ def evaluate(model, loader, device, loss_fn='cosine',
             batch = batch.to(device)
 
             # Forward pass with mixed precision
-            with autocast(enabled=use_amp):
+            with autocast(device_type='cuda', enabled=use_amp):
                 pocket_embedding = model(batch)
                 target_embedding = batch.y
 

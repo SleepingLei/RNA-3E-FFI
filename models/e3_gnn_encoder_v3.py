@@ -210,27 +210,6 @@ class RNAPocketEncoderV3(nn.Module):
         if use_nonbonded:
             self.log_nonbonded_weight = nn.Parameter(torch.tensor(0.0))
 
-    @property
-    def angle_weight(self):
-        """返回约束后的角度权重 (范围: [0, 1])"""
-        if hasattr(self, 'log_angle_weight'):
-            return torch.sigmoid(self.log_angle_weight)
-        return torch.tensor(0.0)
-
-    @property
-    def dihedral_weight(self):
-        """返回约束后的二面角权重 (范围: [0, 1])"""
-        if hasattr(self, 'log_dihedral_weight'):
-            return torch.sigmoid(self.log_dihedral_weight)
-        return torch.tensor(0.0)
-
-    @property
-    def nonbonded_weight(self):
-        """返回约束后的非键权重 (范围: [0, 1])"""
-        if hasattr(self, 'log_nonbonded_weight'):
-            return torch.sigmoid(self.log_nonbonded_weight)
-        return torch.tensor(0.0)
-
         # Input embedding (same as V2)
         self.input_embedding = PhysicalFeatureEmbedding(
             input_dim=input_dim,
@@ -400,6 +379,27 @@ class RNAPocketEncoderV3(nn.Module):
                 elif ir.l == 2:
                     self.irreps_slices['l2'].append((idx, idx + dim))
                 idx += dim
+
+    @property
+    def angle_weight(self):
+        """返回约束后的角度权重 (范围: [0, 1])"""
+        if hasattr(self, 'log_angle_weight'):
+            return torch.sigmoid(self.log_angle_weight)
+        return torch.tensor(0.0, device=self.log_angle_weight.device if hasattr(self, 'log_angle_weight') else 'cpu')
+
+    @property
+    def dihedral_weight(self):
+        """返回约束后的二面角权重 (范围: [0, 1])"""
+        if hasattr(self, 'log_dihedral_weight'):
+            return torch.sigmoid(self.log_dihedral_weight)
+        return torch.tensor(0.0, device=self.log_dihedral_weight.device if hasattr(self, 'log_dihedral_weight') else 'cpu')
+
+    @property
+    def nonbonded_weight(self):
+        """返回约束后的非键权重 (范围: [0, 1])"""
+        if hasattr(self, 'log_nonbonded_weight'):
+            return torch.sigmoid(self.log_nonbonded_weight)
+        return torch.tensor(0.0, device=self.log_nonbonded_weight.device if hasattr(self, 'log_nonbonded_weight') else 'cpu')
 
     def extract_invariant_features(self, h):
         """Extract E(3) invariant features (original version for V2 compatibility)"""
