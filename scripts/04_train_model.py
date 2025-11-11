@@ -789,6 +789,9 @@ def train_worker(rank, world_size, args):
             print(f"  Geometric MP: {args.use_geometric_mp}")
             print(f"  Enhanced invariants: {args.use_enhanced_invariants} (206-dim vs 56-dim)")
             print(f"  Attention heads: {args.num_attention_heads}")
+            print(f"  Initial angle weight: {args.initial_angle_weight:.3f}")
+            print(f"  Initial dihedral weight: {args.initial_dihedral_weight:.3f}")
+            print(f"  Initial nonbonded weight: {args.initial_nonbonded_weight:.3f}")
 
         # V3-specific pooling type override
         v3_pooling_type = 'multihead_attention' if args.num_attention_heads > 1 else args.pooling_type
@@ -809,7 +812,11 @@ def train_worker(rank, world_size, args):
             # V3-specific parameters
             use_geometric_mp=args.use_geometric_mp,
             use_enhanced_invariants=args.use_enhanced_invariants,
-            num_attention_heads=args.num_attention_heads
+            num_attention_heads=args.num_attention_heads,
+            # Learnable weight initial values
+            initial_angle_weight=args.initial_angle_weight,
+            initial_dihedral_weight=args.initial_dihedral_weight,
+            initial_nonbonded_weight=args.initial_nonbonded_weight
         )
     else:
         # Use V2 model (backward compatible)
@@ -1326,6 +1333,12 @@ def main():
                         help="Use enhanced invariant feature extraction 206-dim (V3 only)")
     parser.add_argument("--num_attention_heads", type=int, default=4,
                         help="Number of attention heads for pooling (V3 only, default: 4)")
+    parser.add_argument("--initial_angle_weight", type=float, default=0.5,
+                        help="Initial weight for angle message passing (V3 only, range: 0~1, default: 0.5)")
+    parser.add_argument("--initial_dihedral_weight", type=float, default=0.5,
+                        help="Initial weight for dihedral message passing (V3 only, range: 0~1, default: 0.5)")
+    parser.add_argument("--initial_nonbonded_weight", type=float, default=0.5,
+                        help="Initial weight for non-bonded message passing (V3 only, range: 0~1, default: 0.5)")
 
     # Training arguments
     parser.add_argument("--loss_fn", type=str, default="cosine",

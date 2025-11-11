@@ -181,6 +181,10 @@ class RNAPocketEncoderV3(nn.Module):
         # 新增参数
         use_geometric_mp=True,  # 是否使用几何增强的MP
         use_enhanced_invariants=True,  # 是否使用增强的不变量提取
+        # 可学习权重的初始值（在实际权重空间，会被转换到log-space）
+        initial_angle_weight=0.5,
+        initial_dihedral_weight=0.5,
+        initial_nonbonded_weight=0.5,
     ):
         """
         Args:
@@ -188,6 +192,9 @@ class RNAPocketEncoderV3(nn.Module):
             use_enhanced_invariants: 是否使用增强的不变量提取(206维 vs 56维)
             pooling_type: 'multihead_attention' 或 'attention'
             num_attention_heads: 多头注意力的头数
+            initial_angle_weight: 角度消息传递的初始权重 (0~1之间，默认0.5)
+            initial_dihedral_weight: 二面角消息传递的初始权重 (0~1之间，默认0.5)
+            initial_nonbonded_weight: 非键消息传递的初始权重 (0~1之间，默认0.5)
         """
         super().__init__()
 
@@ -202,13 +209,24 @@ class RNAPocketEncoderV3(nn.Module):
         self.use_enhanced_invariants = use_enhanced_invariants
 
         # Learnable combining weights (使用 log-space 参数化防止无限增长)
-        # 初始化为 log(0.333) ≈ -1.1
+        # 使用 sigmoid 约束到 [0, 1] 范围
+        # 从权重空间转换到log-space: logit(w) = log(w / (1-w))
         if use_multi_hop:
-            # 使用 sigmoid 约束到 [0, 1] 范围
-            self.log_angle_weight = nn.Parameter(torch.tensor(0.0))  # sigmoid(0) = 0.5
-            self.log_dihedral_weight = nn.Parameter(torch.tensor(0.0))
+            # 将初始权重从 [0, 1] 转换到 log-space
+            # 裁剪到 [0.01, 0.99] 避免log(0)或log(∞)
+            angle_w_clipped = max(0.01, min(0.99, initial_angle_weight))
+            dihedral_w_clipped = max(0.01, min(0.99, initial_dihedral_weight))
+
+            angle_logit = torch.log(torch.tensor(angle_w_clipped / (1 - angle_w_clipped)))
+            dihedral_logit = torch.log(torch.tensor(dihedral_w_clipped / (1 - dihedral_w_clipped)))
+
+            self.log_angle_weight = nn.Parameter(angle_logit)
+            self.log_dihedral_weight = nn.Parameter(dihedral_logit)
+
         if use_nonbonded:
-            self.log_nonbonded_weight = nn.Parameter(torch.tensor(0.0))
+            nonbonded_w_clipped = max(0.01, min(0.99, initial_nonbonded_weight))
+            nonbonded_logit = torch.log(torch.tensor(nonbonded_w_clipped / (1 - nonbonded_w_clipped)))
+            self.log_nonbonded_weight = nn.Parameter(nonbonded_logit)
 
         # Input embedding (same as V2)
         self.input_embedding = PhysicalFeatureEmbedding(
