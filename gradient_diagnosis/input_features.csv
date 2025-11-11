@@ -1,0 +1,1 @@
+step,epoch,batch_idx,x_col0_mean,x_col0_std,x_col0_max,x_col0_min,x_col1_mean,x_col1_std,x_col1_max,x_col1_min,x_col2_mean,x_col2_std,x_col2_max,x_col2_min,pos_mean,pos_std,pos_max,pos_min,edge_attr_col0_mean,edge_attr_col0_std,edge_attr_col1_mean,edge_attr_col1_std,triple_attr_col0_mean,triple_attr_col0_std,triple_attr_col1_mean,triple_attr_col1_std,suspicious_features

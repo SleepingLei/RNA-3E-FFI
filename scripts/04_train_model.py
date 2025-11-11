@@ -785,7 +785,7 @@ def train_worker(rank, world_size, args):
         # Use V3 model with improvements
         ModelClass = RNAPocketEncoderV3
         if is_main_process:
-            print("Using RNAPocketEncoderV3 (geometric MP + enhanced invariants + multi-head attention)")
+            print("Using RNAPocketEncoderV3 (geometric MP + enhanced invariants)")
             print(f"  Geometric MP: {args.use_geometric_mp}")
             print(f"  Enhanced invariants: {args.use_enhanced_invariants} (204-dim vs 56-dim)")
             print(f"  Improved layers: {args.use_improved_layers} (Bessel+Cutoff+ImprovedMP)")
@@ -1336,7 +1336,7 @@ def main():
                         help="Use geometric angle/dihedral message passing (V3 only)")
     parser.add_argument("--use_enhanced_invariants", action="store_true", default=True,
                         help="Use enhanced invariant feature extraction 204-dim (V3 only)")
-    parser.add_argument("--use_improved_layers", action="store_true", default=True,
+    parser.add_argument("--use_improved_layers", action="store_true", default=False,
                         help="Use improved layers from layers/ (Bessel+Cutoff+ImprovedMP, V3 only)")
     parser.add_argument("--norm_type", type=str, default='layer', choices=['layer', 'rms'],
                         help="Normalization type: 'layer' or 'rms' (V3 only, default: layer)")
@@ -1374,7 +1374,7 @@ def main():
     parser.add_argument("--scheduler", type=str, default="plateau",
                         choices=["plateau", "cosine"],
                         help="Learning rate scheduler")
-    parser.add_argument("--patience", type=int, default=30,
+    parser.add_argument("--patience", type=int, default=100,
                         help="Early stopping patience")
     parser.add_argument("--num_workers", type=int, default=1,
                         help="Number of data loader workers")

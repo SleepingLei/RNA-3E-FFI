@@ -225,7 +225,7 @@ class RNAPocketEncoderV3(nn.Module):
         use_layer_norm=False,
         use_multi_hop=True,
         use_nonbonded=True,
-        pooling_type='multihead_attention',  # 'multihead_attention' or 'attention'
+        pooling_type='attention',  # 'multihead_attention' or 'attention'
         num_attention_heads=4,  # For multihead attention
         dropout=0.0,
         # V3新增参数
@@ -439,6 +439,7 @@ class RNAPocketEncoderV3(nn.Module):
             self._build_irreps_slices()
 
         # Pooling (IMPROVED with multi-head attention!)
+        print(f"Using pooling type: {pooling_type}")
         if pooling_type == 'multihead_attention':
             self.pooling = MultiHeadAttentionPooling(
                 input_dim=self.invariant_dim,

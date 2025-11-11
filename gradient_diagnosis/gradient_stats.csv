@@ -1,0 +1,1 @@
+step,epoch,batch_idx,loss,lr,total_grad_norm,max_grad_norm,min_grad_norm,num_nan_grads,num_inf_grads,suspicious_layers,data_mean,data_std
