@@ -57,23 +57,42 @@ except ImportError:
 
 class EquivariantLayerNorm(nn.Module):
     """
-    E(3)-equivariant LayerNorm - 只对标量特征 (l=0) 做归一化
-    高阶特征 (l=1, l=2) 保持不变以维持等变性
+    E(3)-equivariant LayerNorm - 改进版，归一化所有特征类型
 
-    用于稳定多跳消息传递的聚合特征，防止特征幅值爆炸
+    策略:
+    - 标量特征 (l=0): 使用标准 LayerNorm
+    - 向量特征 (l=1): 归一化每个向量的范数
+    - 张量特征 (l=2): 归一化每个张量的范数
+
+    这样既保持了E(3)等变性，又防止了特征幅值爆炸
     """
-    def __init__(self, irreps):
+    def __init__(self, irreps, normalize_vectors=True, normalize_tensors=True):
         super().__init__()
         self.irreps = o3.Irreps(irreps)
+        self.normalize_vectors = normalize_vectors
+        self.normalize_tensors = normalize_tensors
 
-        # 找到所有标量特征的位置
+        # 找到所有特征的位置
         self.scalar_indices = []
+        self.vector_slices = []  # [(start, end), ...]
+        self.tensor_slices = []  # [(start, end), ...]
+
         idx = 0
         for mul, ir in self.irreps:
             if ir.l == 0:
                 # 标量特征
                 for _ in range(mul):
                     self.scalar_indices.append(idx)
+                    idx += ir.dim
+            elif ir.l == 1:
+                # 向量特征 (3D)
+                for _ in range(mul):
+                    self.vector_slices.append((idx, idx + ir.dim))
+                    idx += ir.dim
+            elif ir.l == 2:
+                # 张量特征 (5D)
+                for _ in range(mul):
+                    self.tensor_slices.append((idx, idx + ir.dim))
                     idx += ir.dim
             else:
                 idx += mul * ir.dim
@@ -90,21 +109,35 @@ class EquivariantLayerNorm(nn.Module):
             x: [num_atoms, irreps_dim]
 
         Returns:
-            x_norm: [num_atoms, irreps_dim] - 标量部分归一化，向量/张量部分不变
+            x_norm: [num_atoms, irreps_dim] - 所有特征都归一化
         """
-        if self.layer_norm is None or len(self.scalar_indices) == 0:
-            return x
-
         x_norm = x.clone()
 
-        # 提取标量特征
-        scalar_features = x[:, self.scalar_indices]  # [num_atoms, num_scalars]
+        # 1. 归一化标量特征
+        if self.layer_norm is not None and len(self.scalar_indices) > 0:
+            scalar_features = x[:, self.scalar_indices]  # [num_atoms, num_scalars]
+            scalar_features_norm = self.layer_norm(scalar_features)
+            x_norm[:, self.scalar_indices] = scalar_features_norm
 
-        # 归一化
-        scalar_features_norm = self.layer_norm(scalar_features)
+        # 2. 归一化向量范数 (保持方向，缩放幅值)
+        if self.normalize_vectors and len(self.vector_slices) > 0:
+            for start, end in self.vector_slices:
+                vec = x[:, start:end]  # [num_atoms, 3]
+                norm = torch.linalg.norm(vec, dim=-1, keepdim=True).clamp(min=1e-6)
+                # 归一化到单位范数，然后乘以可学习的缩放因子
+                # 这里使用均值范数作为目标
+                mean_norm = norm.mean()
+                vec_normalized = vec / norm * mean_norm
+                x_norm[:, start:end] = vec_normalized
 
-        # 放回
-        x_norm[:, self.scalar_indices] = scalar_features_norm
+        # 3. 归一化张量范数 (保持方向，缩放幅值)
+        if self.normalize_tensors and len(self.tensor_slices) > 0:
+            for start, end in self.tensor_slices:
+                tensor = x[:, start:end]  # [num_atoms, 5]
+                norm = torch.linalg.norm(tensor, dim=-1, keepdim=True).clamp(min=1e-6)
+                mean_norm = norm.mean()
+                tensor_normalized = tensor / norm * mean_norm
+                x_norm[:, start:end] = tensor_normalized
 
         return x_norm
 
@@ -168,12 +201,35 @@ class RNAPocketEncoderV3(nn.Module):
         self.use_geometric_mp = use_geometric_mp
         self.use_enhanced_invariants = use_enhanced_invariants
 
-        # Learnable combining weights
+        # Learnable combining weights (使用 log-space 参数化防止无限增长)
+        # 初始化为 log(0.333) ≈ -1.1
         if use_multi_hop:
-            self.angle_weight = nn.Parameter(torch.tensor(0.333))
-            self.dihedral_weight = nn.Parameter(torch.tensor(0.333))
+            # 使用 sigmoid 约束到 [0, 1] 范围
+            self.log_angle_weight = nn.Parameter(torch.tensor(0.0))  # sigmoid(0) = 0.5
+            self.log_dihedral_weight = nn.Parameter(torch.tensor(0.0))
         if use_nonbonded:
-            self.nonbonded_weight = nn.Parameter(torch.tensor(0.333))
+            self.log_nonbonded_weight = nn.Parameter(torch.tensor(0.0))
+
+    @property
+    def angle_weight(self):
+        """返回约束后的角度权重 (范围: [0, 1])"""
+        if hasattr(self, 'log_angle_weight'):
+            return torch.sigmoid(self.log_angle_weight)
+        return torch.tensor(0.0)
+
+    @property
+    def dihedral_weight(self):
+        """返回约束后的二面角权重 (范围: [0, 1])"""
+        if hasattr(self, 'log_dihedral_weight'):
+            return torch.sigmoid(self.log_dihedral_weight)
+        return torch.tensor(0.0)
+
+    @property
+    def nonbonded_weight(self):
+        """返回约束后的非键权重 (范围: [0, 1])"""
+        if hasattr(self, 'log_nonbonded_weight'):
+            return torch.sigmoid(self.log_nonbonded_weight)
+        return torch.tensor(0.0)
 
         # Input embedding (same as V2)
         self.input_embedding = PhysicalFeatureEmbedding(
@@ -529,6 +585,100 @@ class RNAPocketEncoderV3(nn.Module):
         t = self.extract_invariant_features(h)
 
         return t
+
+    def get_weight_stats(self):
+        """
+        获取可学习权重的统计信息 (用于监控)
+
+        Returns:
+            dict: 包含权重值、梯度、log空间参数等信息
+        """
+        stats = {}
+
+        if hasattr(self, 'log_angle_weight'):
+            stats['angle_weight'] = self.angle_weight.item()
+            stats['log_angle_weight'] = self.log_angle_weight.item()
+            if self.log_angle_weight.grad is not None:
+                stats['angle_weight_grad'] = self.log_angle_weight.grad.item()
+
+        if hasattr(self, 'log_dihedral_weight'):
+            stats['dihedral_weight'] = self.dihedral_weight.item()
+            stats['log_dihedral_weight'] = self.log_dihedral_weight.item()
+            if self.log_dihedral_weight.grad is not None:
+                stats['dihedral_weight_grad'] = self.log_dihedral_weight.grad.item()
+
+        if hasattr(self, 'log_nonbonded_weight'):
+            stats['nonbonded_weight'] = self.nonbonded_weight.item()
+            stats['log_nonbonded_weight'] = self.log_nonbonded_weight.item()
+            if self.log_nonbonded_weight.grad is not None:
+                stats['nonbonded_weight_grad'] = self.log_nonbonded_weight.grad.item()
+
+        return stats
+
+    def get_feature_stats(self, data):
+        """
+        获取每层特征的统计信息 (用于诊断)
+
+        Returns:
+            dict: 包含每层特征的范数、均值、标准差等
+        """
+        x, pos, edge_index = data.x, data.pos, data.edge_index
+        edge_attr = data.edge_attr if hasattr(data, 'edge_attr') else None
+
+        stats = {'layers': []}
+
+        # Initial embedding
+        h = self.input_embedding(x)
+        stats['input_norm'] = torch.linalg.norm(h, dim=-1).mean().item()
+
+        # Message passing
+        for i in range(self.num_layers):
+            layer_stats = {}
+
+            # 1-hop
+            h_bonded = self.bonded_mp_layers[i](h, pos, edge_index, edge_attr)
+            layer_stats['bonded_norm'] = torch.linalg.norm(h_bonded, dim=-1).mean().item()
+            h_new = h_bonded
+
+            # 2-hop
+            if self.use_multi_hop and hasattr(data, 'triple_index'):
+                if self.use_geometric_mp:
+                    h_angle = self.angle_mp_layers[i](h, pos, data.triple_index, data.triple_attr)
+                else:
+                    h_angle = self.angle_mp_layers[i](h, data.triple_index, data.triple_attr)
+                layer_stats['angle_norm'] = torch.linalg.norm(h_angle, dim=-1).mean().item()
+                h_new = h_new + self.angle_weight * h_angle
+
+            # 3-hop
+            if self.use_multi_hop and hasattr(data, 'quadra_index'):
+                if self.use_geometric_mp:
+                    h_dihedral = self.dihedral_mp_layers[i](h, pos, data.quadra_index, data.quadra_attr)
+                else:
+                    h_dihedral = self.dihedral_mp_layers[i](h, data.quadra_index, data.quadra_attr)
+                layer_stats['dihedral_norm'] = torch.linalg.norm(h_dihedral, dim=-1).mean().item()
+                h_new = h_new + self.dihedral_weight * h_dihedral
+
+            # Non-bonded
+            if self.use_nonbonded and hasattr(data, 'nonbonded_edge_index'):
+                h_nonbonded = self.nonbonded_mp_layers[i](
+                    h, pos, data.nonbonded_edge_index, data.nonbonded_edge_attr
+                )
+                layer_stats['nonbonded_norm'] = torch.linalg.norm(h_nonbonded, dim=-1).mean().item()
+                h_new = h_new + self.nonbonded_weight * h_nonbonded
+
+            # 聚合后的统计
+            layer_stats['aggregated_norm'] = torch.linalg.norm(h_new, dim=-1).mean().item()
+
+            # LayerNorm后
+            if (self.use_multi_hop or self.use_nonbonded) and hasattr(self, 'aggregation_layer_norms'):
+                h = self.aggregation_layer_norms[i](h_new)
+                layer_stats['after_norm'] = torch.linalg.norm(h, dim=-1).mean().item()
+            else:
+                h = h_new
+
+            stats['layers'].append(layer_stats)
+
+        return stats
 
 
 # ============================================================================

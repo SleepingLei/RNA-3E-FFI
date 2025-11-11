@@ -289,7 +289,8 @@ def compute_loss(pred, target, loss_fn='cosine', cosine_weight=0.7, mse_weight=0
 def train_epoch(model, loader, optimizer, device, loss_fn='cosine',
                 cosine_weight=0.7, mse_weight=0.3, temperature=0.07,
                 grad_clip=0.0, monitor_gradients=False, accumulation_steps=1,
-                use_amp=False, scaler=None, physics_loss_fn=None, physics_weight=0.1):
+                use_amp=False, scaler=None, physics_loss_fn=None, physics_weight=0.1,
+                monitor_weights=True, monitor_features=False):
     """
     Train for one epoch with gradient accumulation and mixed precision support.
 
@@ -307,6 +308,8 @@ def train_epoch(model, loader, optimizer, device, loss_fn='cosine',
         scaler: GradScaler for mixed precision training
         physics_loss_fn: PhysicsConstraintLoss function (optional, V3 improvement)
         physics_weight: Weight for physics constraint loss
+        monitor_weights: Whether to monitor learnable weights
+        monitor_features: Whether to monitor feature statistics (expensive)
 
     Returns:
         Dictionary with training metrics including loss and learnable weights
@@ -315,6 +318,9 @@ def train_epoch(model, loader, optimizer, device, loss_fn='cosine',
     total_loss = 0
     num_batches = 0
     accumulated_metrics = {}
+
+    # 用于权重监控
+    weight_history = []
 
     # Zero gradients at the start
     optimizer.zero_grad()
@@ -374,7 +380,23 @@ def train_epoch(model, loader, optimizer, device, loss_fn='cosine',
                         if p.grad is not None:
                             total_grad_norm += p.grad.norm().item() ** 2
                     total_grad_norm = total_grad_norm ** 0.5
-                    print(f"  Batch {batch_idx}: Grad norm before clip = {total_grad_norm:.6f}")
+
+                    # 获取权重梯度统计
+                    weight_grad_info = ""
+                    if hasattr(model, 'get_weight_stats'):
+                        try:
+                            model_to_check = model.module if hasattr(model, 'module') else model
+                            weight_stats = model_to_check.get_weight_stats()
+                            if 'angle_weight_grad' in weight_stats:
+                                weight_grad_info += f", angle_w_grad={weight_stats['angle_weight_grad']:.6f}"
+                            if 'dihedral_weight_grad' in weight_stats:
+                                weight_grad_info += f", dihedral_w_grad={weight_stats['dihedral_weight_grad']:.6f}"
+                            if 'nonbonded_weight_grad' in weight_stats:
+                                weight_grad_info += f", nonbonded_w_grad={weight_stats['nonbonded_weight_grad']:.6f}"
+                        except:
+                            pass
+
+                    print(f"  Batch {batch_idx}: Grad norm = {total_grad_norm:.6f}{weight_grad_info}")
 
             # Optional: Gradient clipping for stability
             # Note: For cosine loss, gradients are naturally smaller than MSE
@@ -388,15 +410,19 @@ def train_epoch(model, loader, optimizer, device, loss_fn='cosine',
             else:
                 # V3 model uses stricter gradient clipping (206-dim invariants + multi-hop MP)
                 # Lower thresholds than V2 to handle increased model complexity
+                # 注意：权重约束 (sigmoid) 已经添加，可以适当放宽阈值
                 if loss_fn == 'infonce':
                     # InfoNCE: 2.0 (was 5.0 for V2)
                     torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=2.0)
                 elif loss_fn == 'cosine':
                     # Cosine: 1.5 (was 10.0 for V2)
                     torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.5)
+                elif loss_fn == 'mse':
+                    # MSE: 1.0 (更严格，因为MSE梯度通常较大)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 else:
-                    # MSE and combined: 2.0 (was 5.0 for V2)
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=2.0)
+                    # Combined: 1.5
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.5)
 
             # Update weights with AMP support
             if use_amp:
@@ -430,13 +456,21 @@ def train_epoch(model, loader, optimizer, device, loss_fn='cosine',
     for key, value in accumulated_metrics.items():
         metrics[key] = value / num_batches
 
-    # Get learnable weights if available
-    if hasattr(model, 'angle_weight'):
-        metrics['angle_weight'] = model.angle_weight.item()
-    if hasattr(model, 'dihedral_weight'):
-        metrics['dihedral_weight'] = model.dihedral_weight.item()
-    if hasattr(model, 'nonbonded_weight'):
-        metrics['nonbonded_weight'] = model.nonbonded_weight.item()
+    # Get learnable weights if available (支持DDP包装的模型)
+    model_for_weights = model.module if hasattr(model, 'module') else model
+
+    # 使用新的 get_weight_stats 方法获取完整的权重统计
+    if hasattr(model_for_weights, 'get_weight_stats'):
+        weight_stats = model_for_weights.get_weight_stats()
+        metrics.update(weight_stats)
+    else:
+        # 后备方案：直接访问属性
+        if hasattr(model_for_weights, 'angle_weight'):
+            metrics['angle_weight'] = model_for_weights.angle_weight.item()
+        if hasattr(model_for_weights, 'dihedral_weight'):
+            metrics['dihedral_weight'] = model_for_weights.dihedral_weight.item()
+        if hasattr(model_for_weights, 'nonbonded_weight'):
+            metrics['nonbonded_weight'] = model_for_weights.nonbonded_weight.item()
 
     return metrics
 
@@ -1042,16 +1076,39 @@ def train_worker(rank, world_size, args):
                 if 'nonbonded_energy' in train_metrics:
                     print(f"    Non-bonded: {train_metrics['nonbonded_energy']:.4f}")
 
-            # Print learnable weights if available
+            # Print learnable weights if available (增强版，显示更多信息)
+            print("\n  📊 Learnable Weights Monitoring:")
             if 'angle_weight' in train_metrics:
-                print(f"  Angle weight: {train_metrics['angle_weight']:.4f}")
+                log_val = train_metrics.get('log_angle_weight', 'N/A')
+                grad_val = train_metrics.get('angle_weight_grad', 'N/A')
+                print(f"    Angle:     weight={train_metrics['angle_weight']:.4f}, "
+                      f"log_space={log_val if isinstance(log_val, str) else f'{log_val:.4f}'}, "
+                      f"grad={grad_val if isinstance(grad_val, str) else f'{grad_val:.6f}'}")
                 weight_history['angle_weight'].append(train_metrics['angle_weight'])
+
             if 'dihedral_weight' in train_metrics:
-                print(f"  Dihedral weight: {train_metrics['dihedral_weight']:.4f}")
+                log_val = train_metrics.get('log_dihedral_weight', 'N/A')
+                grad_val = train_metrics.get('dihedral_weight_grad', 'N/A')
+                print(f"    Dihedral:  weight={train_metrics['dihedral_weight']:.4f}, "
+                      f"log_space={log_val if isinstance(log_val, str) else f'{log_val:.4f}'}, "
+                      f"grad={grad_val if isinstance(grad_val, str) else f'{grad_val:.6f}'}")
                 weight_history['dihedral_weight'].append(train_metrics['dihedral_weight'])
+
             if 'nonbonded_weight' in train_metrics:
-                print(f"  Nonbonded weight: {train_metrics['nonbonded_weight']:.4f}")
+                log_val = train_metrics.get('log_nonbonded_weight', 'N/A')
+                grad_val = train_metrics.get('nonbonded_weight_grad', 'N/A')
+                print(f"    Nonbonded: weight={train_metrics['nonbonded_weight']:.4f}, "
+                      f"log_space={log_val if isinstance(log_val, str) else f'{log_val:.4f}'}, "
+                      f"grad={grad_val if isinstance(grad_val, str) else f'{grad_val:.6f}'}")
                 weight_history['nonbonded_weight'].append(train_metrics['nonbonded_weight'])
+
+            # 检查权重是否异常增长
+            if 'angle_weight' in train_metrics and train_metrics['angle_weight'] > 0.9:
+                print(f"    ⚠️  WARNING: Angle weight is very high ({train_metrics['angle_weight']:.4f})!")
+            if 'dihedral_weight' in train_metrics and train_metrics['dihedral_weight'] > 0.9:
+                print(f"    ⚠️  WARNING: Dihedral weight is very high ({train_metrics['dihedral_weight']:.4f})!")
+            if 'nonbonded_weight' in train_metrics and train_metrics['nonbonded_weight'] > 0.9:
+                print(f"    ⚠️  WARNING: Nonbonded weight is very high ({train_metrics['nonbonded_weight']:.4f})!")
 
         # Validate
         val_metrics = evaluate(
@@ -1169,23 +1226,42 @@ def train_worker(rank, world_size, args):
             print(f"Best validation cosine similarity: {max(cosine_sim_history):.4f}")
         print(f"Best model saved to {output_dir / 'best_model.pt'}")
 
-        # Print final learnable weights
+        # Print final learnable weights (增强版)
         if args.use_multi_hop or args.use_nonbonded:
-            print("\nFinal learnable weights:")
-            if hasattr(model_for_params, 'angle_weight'):
-                print(f"  Angle weight: {model_for_params.angle_weight.item():.4f} (initial: 0.333)")
-            if hasattr(model_for_params, 'dihedral_weight'):
-                print(f"  Dihedral weight: {model_for_params.dihedral_weight.item():.4f} (initial: 0.333)")
-            if hasattr(model_for_params, 'nonbonded_weight'):
-                print(f"  Nonbonded weight: {model_for_params.nonbonded_weight.item():.4f} (initial: 0.333)")
+            print("\n" + "=" * 60)
+            print("📊 Final Learnable Weights Summary")
+            print("=" * 60)
 
-            # If using fixed version, show log-space parameters
-            if args.use_weight_constraints and hasattr(model_for_params, 'get_weight_summary'):
-                print("\nWeight constraints (log-space parameters):")
-                summary = model_for_params.get_weight_summary()
-                for key, value in summary.items():
-                    if 'log' in key:
-                        print(f"  {key}: {value:.4f}")
+            if hasattr(model_for_params, 'get_weight_stats'):
+                final_stats = model_for_params.get_weight_stats()
+
+                if 'angle_weight' in final_stats:
+                    print(f"  Angle weight:")
+                    print(f"    Final value:     {final_stats['angle_weight']:.4f} (initial: 0.500)")
+                    print(f"    Log-space param: {final_stats['log_angle_weight']:.4f}")
+                    print(f"    Change:          {final_stats['angle_weight'] - 0.5:+.4f}")
+
+                if 'dihedral_weight' in final_stats:
+                    print(f"  Dihedral weight:")
+                    print(f"    Final value:     {final_stats['dihedral_weight']:.4f} (initial: 0.500)")
+                    print(f"    Log-space param: {final_stats['log_dihedral_weight']:.4f}")
+                    print(f"    Change:          {final_stats['dihedral_weight'] - 0.5:+.4f}")
+
+                if 'nonbonded_weight' in final_stats:
+                    print(f"  Nonbonded weight:")
+                    print(f"    Final value:     {final_stats['nonbonded_weight']:.4f} (initial: 0.500)")
+                    print(f"    Log-space param: {final_stats['log_nonbonded_weight']:.4f}")
+                    print(f"    Change:          {final_stats['nonbonded_weight'] - 0.5:+.4f}")
+            else:
+                # 后备方案
+                if hasattr(model_for_params, 'angle_weight'):
+                    print(f"  Angle weight: {model_for_params.angle_weight.item():.4f} (initial: 0.500)")
+                if hasattr(model_for_params, 'dihedral_weight'):
+                    print(f"  Dihedral weight: {model_for_params.dihedral_weight.item():.4f} (initial: 0.500)")
+                if hasattr(model_for_params, 'nonbonded_weight'):
+                    print(f"  Nonbonded weight: {model_for_params.nonbonded_weight.item():.4f} (initial: 0.500)")
+
+            print("=" * 60)
 
     # Cleanup DDP
     if args.use_ddp and world_size > 1:
