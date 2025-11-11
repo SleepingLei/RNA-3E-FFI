@@ -315,11 +315,11 @@ class EnhancedInvariantExtractor(nn.Module):
     1. 标量特征（原有）
     2. 向量/张量的L2范数（原有）
     3. 向量之间的点积（新增，成对交互）- 归一化处理
-    4. 高阶统计量（新增，均值/方差）
 
     所有特征都严格保持E(3)不变性！
 
     改进: 添加特征归一化以提高数值稳定性
+    注意: 移除了高阶统计量以简化特征空间
     """
 
     def __init__(self, hidden_irreps="32x0e + 16x1o + 8x2e", normalize_features=True):
@@ -359,14 +359,10 @@ class EnhancedInvariantExtractor(nn.Module):
         # C(8, 2) = 8 * 7 / 2 = 28
         tensor_dot_products = num_l2 * (num_l2 - 1) // 2  # 28
 
-        # 向量范数的统计量（均值、标准差）
-        vector_stats = 2  # mean, std
-
         self.invariant_dim = (basic_invariants +
                              vector_dot_products +
-                             tensor_dot_products +
-                             vector_stats)
-        # 56 + 120 + 28 + 2 = 206
+                             tensor_dot_products)
+        # 56 + 120 + 28 = 204
 
     def forward(self, h):
         """
@@ -461,16 +457,8 @@ class EnhancedInvariantExtractor(nn.Module):
                 tensor_dot_products = torch.cat(tensor_dot_products, dim=-1)  # [num_atoms, 28]
                 invariant_features.append(tensor_dot_products)
 
-        # ========== 6. 向量范数的统计量 ==========
-        if vector_norms is not None and len(vector_norms) > 0:
-            # 均值和标准差都是标量，旋转不变
-            vec_norm_mean = vector_norms.mean(dim=-1, keepdim=True)  # [num_atoms, 1]
-            vec_norm_std = vector_norms.std(dim=-1, keepdim=True)    # [num_atoms, 1]
-            invariant_features.append(vec_norm_mean)
-            invariant_features.append(vec_norm_std)
-
         # Concatenate all invariant features
-        t = torch.cat(invariant_features, dim=-1)  # [num_atoms, 206]
+        t = torch.cat(invariant_features, dim=-1)  # [num_atoms, 204]
 
         return t
 
@@ -929,12 +917,12 @@ if __name__ == "__main__":
     # Test 5: MultiHeadAttentionPooling
     print("\n5. Testing MultiHeadAttentionPooling...")
     pooling = MultiHeadAttentionPooling(
-        input_dim=206,  # invariant_dim from enhanced extractor
+        input_dim=204,  # invariant_dim from enhanced extractor
         num_heads=4,
         hidden_dim=128
     )
 
-    x = torch.randn(30, 206)  # 30 atoms
+    x = torch.randn(30, 204)  # 30 atoms
     batch = torch.tensor([0]*10 + [1]*10 + [2]*10)  # 3 graphs
 
     graph_emb = pooling(x, batch)

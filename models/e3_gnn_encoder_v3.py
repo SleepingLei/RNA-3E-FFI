@@ -4,9 +4,12 @@ E(3) Equivariant GNN Encoder - Version 3.0 (Improved)
 
 改进版本，集成以下增强功能:
 1. ✅ 几何信息融入的角度/二面角消息传递
-2. ✅ 更丰富的不变特征提取 (56 → 206 维)
+2. ✅ 更丰富的不变特征提取 (56 → 204 维)
 3. ✅ Multi-head attention pooling
 4. ✅ 物理约束loss支持
+5. ✅ Bessel basis + Polynomial cutoff (NEW!)
+6. ✅ Improved message passing from layers/ (NEW!)
+7. ✅ Affine LayerNorm with learnable parameters (NEW!)
 
 使用方法:
     from models.e3_gnn_encoder_v3 import RNAPocketEncoderV3
@@ -14,9 +17,9 @@ E(3) Equivariant GNN Encoder - Version 3.0 (Improved)
     model = RNAPocketEncoderV3(
         output_dim=512,
         num_layers=4,
-        use_geometric_mp=True,  # 使用几何增强的MP
-        use_enhanced_invariants=True,  # 使用增强的不变量提取
-        use_multihead_attention=True,  # 使用多头注意力池化
+        use_geometric_mp=True,
+        use_enhanced_invariants=True,
+        use_improved_layers=True,  # 使用 layers/ 改进组件
     )
 """
 
@@ -29,20 +32,45 @@ from e3nn import o3
 from e3nn.nn import Gate
 import warnings
 
-# Import base components from v2
+# Setup path
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
+# Priority 1: Import improved layers (最优先)
 try:
-    from e3_gnn_encoder_v2 import (
-        PhysicalFeatureEmbedding,
-        E3GNNMessagePassingLayer
+    from .layers import (
+        ImprovedE3MessagePassingLayer,
+        BesselBasis,
+        PolynomialCutoff,
+        EquivariantLayerNorm as LayersEquivariantLayerNorm,
+        EquivariantRMSNorm
     )
+    _has_improved_layers = True
 except ImportError:
-    warnings.warn("Could not import from e3_gnn_encoder_v2. Make sure it's in the same directory.")
+    try:
+        from layers import (
+            ImprovedE3MessagePassingLayer,
+            BesselBasis,
+            PolynomialCutoff,
+            EquivariantLayerNorm as LayersEquivariantLayerNorm,
+            EquivariantRMSNorm
+        )
+        _has_improved_layers = True
+    except ImportError:
+        _has_improved_layers = False
+        ImprovedE3MessagePassingLayer = None
+        warnings.warn("layers/ module not found. Using basic implementations.")
 
-# Import improved components
+# Priority 2: Import V2 base components (备用)
+try:
+    from e3_gnn_encoder_v2 import PhysicalFeatureEmbedding
+    _has_v2_components = True
+except ImportError:
+    _has_v2_components = False
+    warnings.warn("Could not import from e3_gnn_encoder_v2.")
+
+# Priority 3: Import improved components (几何MP等)
 try:
     from improved_components import (
         GeometricAngleMessagePassing,
@@ -51,8 +79,10 @@ try:
         MultiHeadAttentionPooling,
         PhysicsConstraintLoss
     )
+    _has_improved_components = True
 except ImportError:
-    warnings.warn("Could not import improved_components. Make sure it's in the same directory.")
+    _has_improved_components = False
+    warnings.warn("Could not import improved_components.")
 
 
 class EquivariantLayerNorm(nn.Module):
@@ -60,17 +90,22 @@ class EquivariantLayerNorm(nn.Module):
     E(3)-equivariant LayerNorm - 改进版，归一化所有特征类型
 
     策略:
-    - 标量特征 (l=0): 使用标准 LayerNorm
+    - 标量特征 (l=0): 使用标准 LayerNorm with affine parameters
     - 向量特征 (l=1): 归一化每个向量的范数
     - 张量特征 (l=2): 归一化每个张量的范数
 
     这样既保持了E(3)等变性，又防止了特征幅值爆炸
+
+    改进: 添加可学习的 affine 参数 (scale/shift)
     """
-    def __init__(self, irreps, normalize_vectors=True, normalize_tensors=True):
+    def __init__(self, irreps, normalize_vectors=True, normalize_tensors=True,
+                 affine=True, eps=1e-5):
         super().__init__()
         self.irreps = o3.Irreps(irreps)
         self.normalize_vectors = normalize_vectors
         self.normalize_tensors = normalize_tensors
+        self.affine = affine
+        self.eps = eps
 
         # 找到所有特征的位置
         self.scalar_indices = []
@@ -97,11 +132,21 @@ class EquivariantLayerNorm(nn.Module):
             else:
                 idx += mul * ir.dim
 
-        # 为标量特征创建 LayerNorm
+        # 为标量特征创建 LayerNorm (affine=False，我们自己管理)
         if len(self.scalar_indices) > 0:
-            self.layer_norm = nn.LayerNorm(len(self.scalar_indices))
+            self.layer_norm = nn.LayerNorm(len(self.scalar_indices), elementwise_affine=False, eps=eps)
+
+            # 添加可学习的 affine 参数
+            if affine:
+                self.weight = nn.Parameter(torch.ones(len(self.scalar_indices)))
+                self.bias = nn.Parameter(torch.zeros(len(self.scalar_indices)))
+            else:
+                self.register_parameter('weight', None)
+                self.register_parameter('bias', None)
         else:
             self.layer_norm = None
+            self.weight = None
+            self.bias = None
 
     def forward(self, x):
         """
@@ -117,6 +162,11 @@ class EquivariantLayerNorm(nn.Module):
         if self.layer_norm is not None and len(self.scalar_indices) > 0:
             scalar_features = x[:, self.scalar_indices]  # [num_atoms, num_scalars]
             scalar_features_norm = self.layer_norm(scalar_features)
+
+            # 应用 affine 变换 (如果启用)
+            if self.affine and self.weight is not None:
+                scalar_features_norm = scalar_features_norm * self.weight + self.bias
+
             x_norm[:, self.scalar_indices] = scalar_features_norm
 
         # 2. 归一化向量范数 (保持方向，缩放幅值)
@@ -148,7 +198,7 @@ class RNAPocketEncoderV3(nn.Module):
 
     主要改进:
     1. 几何增强的角度/二面角消息传递
-    2. 更丰富的不变特征提取 (206维 vs 56维)
+    2. 更丰富的不变特征提取 (204维 vs 56维)
     3. Multi-head attention pooling
     4. 物理约束loss集成
 
@@ -178,9 +228,11 @@ class RNAPocketEncoderV3(nn.Module):
         pooling_type='multihead_attention',  # 'multihead_attention' or 'attention'
         num_attention_heads=4,  # For multihead attention
         dropout=0.0,
-        # 新增参数
+        # V3新增参数
         use_geometric_mp=True,  # 是否使用几何增强的MP
         use_enhanced_invariants=True,  # 是否使用增强的不变量提取
+        use_improved_layers=True,  # 是否使用 layers/ 改进组件 (NEW!)
+        norm_type='layer',  # 'layer' or 'rms' (NEW!)
         # 可学习权重的初始值（在实际权重空间，会被转换到log-space）
         initial_angle_weight=0.5,
         initial_dihedral_weight=0.5,
@@ -189,7 +241,9 @@ class RNAPocketEncoderV3(nn.Module):
         """
         Args:
             use_geometric_mp: 是否在角度/二面角MP中使用几何信息
-            use_enhanced_invariants: 是否使用增强的不变量提取(206维 vs 56维)
+            use_enhanced_invariants: 是否使用增强的不变量提取(204维 vs 56维)
+            use_improved_layers: 是否使用 layers/ 改进组件 (Bessel+Cutoff+ImprovedMP)
+            norm_type: 归一化类型 ('layer' 或 'rms')
             pooling_type: 'multihead_attention' 或 'attention'
             num_attention_heads: 多头注意力的头数
             initial_angle_weight: 角度消息传递的初始权重 (0~1之间，默认0.5)
@@ -207,6 +261,8 @@ class RNAPocketEncoderV3(nn.Module):
         self.use_nonbonded = use_nonbonded
         self.use_geometric_mp = use_geometric_mp
         self.use_enhanced_invariants = use_enhanced_invariants
+        self.use_improved_layers = use_improved_layers and _has_improved_layers
+        self.norm_type = norm_type
 
         # Learnable combining weights (使用 log-space 参数化防止无限增长)
         # 使用 sigmoid 约束到 [0, 1] 范围
@@ -235,23 +291,42 @@ class RNAPocketEncoderV3(nn.Module):
             output_irreps=hidden_irreps
         )
 
-        # 1-hop bonded message passing (same as V2)
+        # 1-hop bonded message passing (使用改进版本 if available)
         self.bonded_mp_layers = nn.ModuleList()
         for i in range(num_layers):
-            layer = E3GNNMessagePassingLayer(
-                irreps_in=self.hidden_irreps,
-                irreps_out=self.hidden_irreps,
-                irreps_sh="0e + 1o + 2e",
-                num_radial_basis=num_radial_basis,
-                radial_hidden_dim=radial_hidden_dim,
-                edge_attr_dim=2,  # [req, k]
-                r_max=r_max,
-                avg_num_neighbors=avg_num_neighbors,
-                use_gate=use_gate,
-                use_sc=True,
-                use_resnet=True,
-                use_layer_norm=use_layer_norm
-            )
+            if self.use_improved_layers:
+                # 使用 ImprovedE3MessagePassingLayer from layers/
+                layer = ImprovedE3MessagePassingLayer(
+                    irreps_in=self.hidden_irreps,
+                    irreps_out=self.hidden_irreps,
+                    irreps_sh="0e + 1o + 2e",
+                    r_max=r_max,
+                    num_radial_basis=num_radial_basis,
+                    radial_hidden_dim=radial_hidden_dim,
+                    avg_num_neighbors=avg_num_neighbors,
+                    use_gate=use_gate,
+                    use_sc=True,
+                    use_resnet=True,
+                    use_layer_norm=use_layer_norm,
+                    edge_attr_dim=2  # [req, k]
+                )
+            else:
+                # 使用 V2 的基础实现
+                from e3_gnn_encoder_v2 import E3GNNMessagePassingLayer
+                layer = E3GNNMessagePassingLayer(
+                    irreps_in=self.hidden_irreps,
+                    irreps_out=self.hidden_irreps,
+                    irreps_sh="0e + 1o + 2e",
+                    num_radial_basis=num_radial_basis,
+                    radial_hidden_dim=radial_hidden_dim,
+                    edge_attr_dim=2,  # [req, k]
+                    r_max=r_max,
+                    avg_num_neighbors=avg_num_neighbors,
+                    use_gate=use_gate,
+                    use_sc=True,
+                    use_resnet=True,
+                    use_layer_norm=use_layer_norm
+                )
             self.bonded_mp_layers.append(layer)
 
         # 2-hop angle message passing (IMPROVED with geometry!)
@@ -325,21 +400,34 @@ class RNAPocketEncoderV3(nn.Module):
                 self.nonbonded_mp_layers.append(layer)
 
         # LayerNorm for stabilizing multi-hop aggregation (防止特征幅值爆炸)
+        # 支持 RMSNorm (更快) 或 LayerNorm (with affine)
         if use_multi_hop or use_nonbonded:
             self.aggregation_layer_norms = nn.ModuleList()
             for i in range(num_layers):
-                self.aggregation_layer_norms.append(
-                    EquivariantLayerNorm(self.hidden_irreps)
-                )
+                if self.norm_type == 'rms' and self.use_improved_layers:
+                    # 使用 RMSNorm from layers/ (更快)
+                    self.aggregation_layer_norms.append(
+                        EquivariantRMSNorm(self.hidden_irreps, affine=True)
+                    )
+                elif self.use_improved_layers:
+                    # 使用 layers/ 的 LayerNorm (有 affine)
+                    self.aggregation_layer_norms.append(
+                        LayersEquivariantLayerNorm(self.hidden_irreps, affine=True)
+                    )
+                else:
+                    # 使用本地的 EquivariantLayerNorm (现在也有 affine)
+                    self.aggregation_layer_norms.append(
+                        EquivariantLayerNorm(self.hidden_irreps, affine=True)
+                    )
 
         # Invariant feature extraction (IMPROVED!)
         if use_enhanced_invariants:
-            # 使用增强版本: 206维（带归一化稳定性改进）
+            # 使用增强版本: 204维（带归一化稳定性改进）
             self.invariant_extractor = EnhancedInvariantExtractor(
                 hidden_irreps,
                 normalize_features=True  # 启用特征归一化提高数值稳定性
             )
-            self.invariant_dim = self.invariant_extractor.invariant_dim  # 206
+            self.invariant_dim = self.invariant_extractor.invariant_dim  # 204
         else:
             # 使用原始版本: 56维
             self.invariant_extractor = None
@@ -825,7 +913,7 @@ if __name__ == "__main__":
     print(f"{'Feature':<40} {'V2':<15} {'V3':<15}")
     print("-" * 80)
     print(f"{'Geometric Angle/Dihedral MP':<40} {'❌ No':<15} {'✅ Yes':<15}")
-    print(f"{'Invariant Features Dim':<40} {'56':<15} {'206':<15}")
+    print(f"{'Invariant Features Dim':<40} {'56':<15} {'204':<15}")
     print(f"{'Multi-head Attention Pooling':<40} {'❌ No':<15} {'✅ Yes':<15}")
     print(f"{'Physics Constraint Loss':<40} {'❌ No':<15} {'✅ Yes':<15}")
     print(f"{'Backward Compatible':<40} {'N/A':<15} {'✅ Yes':<15}")

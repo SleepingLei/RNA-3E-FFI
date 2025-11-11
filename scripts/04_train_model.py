@@ -412,7 +412,7 @@ def train_epoch(model, loader, optimizer, device, loss_fn='cosine',
                 # Use user-specified clipping value
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=grad_clip)
             else:
-                # V3 model uses stricter gradient clipping (206-dim invariants + multi-hop MP)
+                # V3 model uses stricter gradient clipping (204-dim invariants + multi-hop MP)
                 # Lower thresholds than V2 to handle increased model complexity
                 # 注意：权重约束 (sigmoid) 已经添加，可以适当放宽阈值
                 if loss_fn == 'infonce':
@@ -787,7 +787,9 @@ def train_worker(rank, world_size, args):
         if is_main_process:
             print("Using RNAPocketEncoderV3 (geometric MP + enhanced invariants + multi-head attention)")
             print(f"  Geometric MP: {args.use_geometric_mp}")
-            print(f"  Enhanced invariants: {args.use_enhanced_invariants} (206-dim vs 56-dim)")
+            print(f"  Enhanced invariants: {args.use_enhanced_invariants} (204-dim vs 56-dim)")
+            print(f"  Improved layers: {args.use_improved_layers} (Bessel+Cutoff+ImprovedMP)")
+            print(f"  Norm type: {args.norm_type}")
             print(f"  Attention heads: {args.num_attention_heads}")
             print(f"  Initial angle weight: {args.initial_angle_weight:.3f}")
             print(f"  Initial dihedral weight: {args.initial_dihedral_weight:.3f}")
@@ -816,7 +818,10 @@ def train_worker(rank, world_size, args):
             # Learnable weight initial values
             initial_angle_weight=args.initial_angle_weight,
             initial_dihedral_weight=args.initial_dihedral_weight,
-            initial_nonbonded_weight=args.initial_nonbonded_weight
+            initial_nonbonded_weight=args.initial_nonbonded_weight,
+            # Improved layers parameters (V3 only)
+            use_improved_layers=args.use_improved_layers,
+            norm_type=args.norm_type
         )
     else:
         # Use V2 model (backward compatible)
@@ -1330,7 +1335,11 @@ def main():
     parser.add_argument("--use_geometric_mp", action="store_true", default=True,
                         help="Use geometric angle/dihedral message passing (V3 only)")
     parser.add_argument("--use_enhanced_invariants", action="store_true", default=True,
-                        help="Use enhanced invariant feature extraction 206-dim (V3 only)")
+                        help="Use enhanced invariant feature extraction 204-dim (V3 only)")
+    parser.add_argument("--use_improved_layers", action="store_true", default=True,
+                        help="Use improved layers from layers/ (Bessel+Cutoff+ImprovedMP, V3 only)")
+    parser.add_argument("--norm_type", type=str, default='layer', choices=['layer', 'rms'],
+                        help="Normalization type: 'layer' or 'rms' (V3 only, default: layer)")
     parser.add_argument("--num_attention_heads", type=int, default=4,
                         help="Number of attention heads for pooling (V3 only, default: 4)")
     parser.add_argument("--initial_angle_weight", type=float, default=0.5,
