@@ -84,5 +84,6 @@ data/
 archive/
 docs/
 nohup.out
-./*md
-./albation
+.*md
+./albation*
+*out

@@ -35,7 +35,7 @@
   "weight_decay": 2e-06,
   "optimizer": "adamw",
   "scheduler": "plateau",
-  "patience": 30,
+  "patience": 100,
   "num_workers": 1,
   "grad_clip": 2.0,
   "monitor_gradients": true,
