@@ -256,7 +256,7 @@ class RNAPocketEncoderV3(nn.Module):
         self.use_nonbonded = use_nonbonded
         self.use_geometric_mp = use_geometric_mp
         self.use_enhanced_invariants = use_enhanced_invariants
-        self.use_improved_layers = use_improved_layers and _has_improved_layers
+        self.use_improved_layers = use_improved_layers  # V3 always uses improved layers
         self.norm_type = norm_type
 
         # Learnable combining weights (使用 log-space 参数化防止无限增长)
