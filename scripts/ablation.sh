@@ -23,6 +23,7 @@ python scripts/04_train_model.py \
     --use_v3_model --num_attention_heads 8 --use_improved_layers --grad_clip 2.0 \
     --use_nonbonded \
     --initial_angle_weight 0.33 --initial_dihedral_weight 0.33 --initial_nonbonded_weight 0.33 \
+    # --use_enhanced_invariants
     #--resume --checkpoint models/physics_v3_6_0.1/checkpoint_epoch_120.pt
     #--accumulation_step 2 \
 echo ""
