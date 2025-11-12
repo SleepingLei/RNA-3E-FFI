@@ -64,10 +64,11 @@ except ImportError:
 
 # Priority 2: Import V2 base components (备用)
 try:
-    from e3_gnn_encoder_v2 import PhysicalFeatureEmbedding
+    from e3_gnn_encoder_v2 import PhysicalFeatureEmbedding, E3GNNMessagePassingLayer
     _has_v2_components = True
 except ImportError:
     _has_v2_components = False
+    E3GNNMessagePassingLayer = None
     warnings.warn("Could not import from e3_gnn_encoder_v2.")
 
 # Priority 3: Import improved components (几何MP等)
@@ -312,7 +313,6 @@ class RNAPocketEncoderV3(nn.Module):
                 )
             else:
                 # 使用 V2 的基础实现
-                from e3_gnn_encoder_v2 import E3GNNMessagePassingLayer
                 layer = E3GNNMessagePassingLayer(
                     irreps_in=self.hidden_irreps,
                     irreps_out=self.hidden_irreps,
