@@ -37,7 +37,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
-# Priority 1: Import improved layers (最优先)
+# Import improved layers (required for V3)
 try:
     from .layers import (
         ImprovedE3MessagePassingLayer,
@@ -46,33 +46,31 @@ try:
         EquivariantLayerNorm as LayersEquivariantLayerNorm,
         EquivariantRMSNorm
     )
-    _has_improved_layers = True
 except ImportError:
-    try:
-        from layers import (
-            ImprovedE3MessagePassingLayer,
-            BesselBasis,
-            PolynomialCutoff,
-            EquivariantLayerNorm as LayersEquivariantLayerNorm,
-            EquivariantRMSNorm
-        )
-        _has_improved_layers = True
-    except ImportError:
-        _has_improved_layers = False
-        ImprovedE3MessagePassingLayer = None
-        warnings.warn("layers/ module not found. Using basic implementations.")
+    from layers import (
+        ImprovedE3MessagePassingLayer,
+        BesselBasis,
+        PolynomialCutoff,
+        EquivariantLayerNorm as LayersEquivariantLayerNorm,
+        EquivariantRMSNorm
+    )
 
-# Priority 2: Import V2 base components (备用)
+# Import base embedding from V2 (only component we need from V2)
 try:
-    from e3_gnn_encoder_v2 import PhysicalFeatureEmbedding, E3GNNMessagePassingLayer
-    _has_v2_components = True
+    from .e3_gnn_encoder_v2 import PhysicalFeatureEmbedding
 except ImportError:
-    _has_v2_components = False
-    E3GNNMessagePassingLayer = None
-    warnings.warn("Could not import from e3_gnn_encoder_v2.")
+    from e3_gnn_encoder_v2 import PhysicalFeatureEmbedding
 
-# Priority 3: Import improved components (几何MP等)
+# Import improved components (geometric MP, invariants, etc.)
 try:
+    from .improved_components import (
+        GeometricAngleMessagePassing,
+        GeometricDihedralMessagePassing,
+        EnhancedInvariantExtractor,
+        MultiHeadAttentionPooling,
+        PhysicsConstraintLoss
+    )
+except ImportError:
     from improved_components import (
         GeometricAngleMessagePassing,
         GeometricDihedralMessagePassing,
@@ -80,10 +78,6 @@ try:
         MultiHeadAttentionPooling,
         PhysicsConstraintLoss
     )
-    _has_improved_components = True
-except ImportError:
-    _has_improved_components = False
-    warnings.warn("Could not import improved_components.")
 
 
 class EquivariantLayerNorm(nn.Module):
@@ -292,11 +286,57 @@ class RNAPocketEncoderV3(nn.Module):
             output_irreps=hidden_irreps
         )
 
-        # 1-hop bonded message passing (使用改进版本 if available)
+        # 1-hop bonded message passing (always use improved layers)
         self.bonded_mp_layers = nn.ModuleList()
         for i in range(num_layers):
-            if self.use_improved_layers:
-                # 使用 ImprovedE3MessagePassingLayer from layers/
+            layer = ImprovedE3MessagePassingLayer(
+                irreps_in=self.hidden_irreps,
+                irreps_out=self.hidden_irreps,
+                irreps_sh="0e + 1o + 2e",
+                r_max=r_max,
+                num_radial_basis=num_radial_basis,
+                radial_hidden_dim=radial_hidden_dim,
+                avg_num_neighbors=avg_num_neighbors,
+                use_gate=use_gate,
+                use_sc=True,
+                use_resnet=True,
+                use_layer_norm=use_layer_norm,
+                edge_attr_dim=2  # [req, k]
+            )
+            self.bonded_mp_layers.append(layer)
+
+        # 2-hop angle message passing (geometric enhanced)
+        if use_multi_hop:
+            self.angle_mp_layers = nn.ModuleList()
+            for i in range(num_layers):
+                layer = GeometricAngleMessagePassing(
+                    irreps_in=self.hidden_irreps,
+                    irreps_out=self.hidden_irreps,
+                    angle_attr_dim=2,
+                    hidden_dim=64,
+                    use_geometry=use_geometric_mp,
+                    use_layer_norm=True  # 启用 LayerNorm 提高数值稳定性
+                )
+                self.angle_mp_layers.append(layer)
+
+        # 3-hop dihedral message passing (geometric enhanced)
+        if use_multi_hop:
+            self.dihedral_mp_layers = nn.ModuleList()
+            for i in range(num_layers):
+                layer = GeometricDihedralMessagePassing(
+                    irreps_in=self.hidden_irreps,
+                    irreps_out=self.hidden_irreps,
+                    dihedral_attr_dim=3,
+                    hidden_dim=64,
+                    use_geometry=use_geometric_mp,
+                    use_layer_norm=True  # 启用 LayerNorm 提高数值稳定性
+                )
+                self.dihedral_mp_layers.append(layer)
+
+        # Non-bonded message passing (improved layers)
+        if use_nonbonded:
+            self.nonbonded_mp_layers = nn.ModuleList()
+            for i in range(num_layers):
                 layer = ImprovedE3MessagePassingLayer(
                     irreps_in=self.hidden_irreps,
                     irreps_out=self.hidden_irreps,
@@ -306,96 +346,10 @@ class RNAPocketEncoderV3(nn.Module):
                     radial_hidden_dim=radial_hidden_dim,
                     avg_num_neighbors=avg_num_neighbors,
                     use_gate=use_gate,
-                    use_sc=True,
-                    use_resnet=True,
-                    use_layer_norm=use_layer_norm,
-                    edge_attr_dim=2  # [req, k]
-                )
-            else:
-                # 使用 V2 的基础实现
-                layer = E3GNNMessagePassingLayer(
-                    irreps_in=self.hidden_irreps,
-                    irreps_out=self.hidden_irreps,
-                    irreps_sh="0e + 1o + 2e",
-                    num_radial_basis=num_radial_basis,
-                    radial_hidden_dim=radial_hidden_dim,
-                    edge_attr_dim=2,  # [req, k]
-                    r_max=r_max,
-                    avg_num_neighbors=avg_num_neighbors,
-                    use_gate=use_gate,
-                    use_sc=True,
-                    use_resnet=True,
-                    use_layer_norm=use_layer_norm
-                )
-            self.bonded_mp_layers.append(layer)
-
-        # 2-hop angle message passing (IMPROVED with geometry!)
-        if use_multi_hop:
-            self.angle_mp_layers = nn.ModuleList()
-            for i in range(num_layers):
-                if use_geometric_mp:
-                    # 使用几何增强版本（带 LayerNorm 稳定性改进）
-                    layer = GeometricAngleMessagePassing(
-                        irreps_in=self.hidden_irreps,
-                        irreps_out=self.hidden_irreps,
-                        angle_attr_dim=2,
-                        hidden_dim=64,
-                        use_geometry=True,
-                        use_layer_norm=True  # 启用 LayerNorm 提高数值稳定性
-                    )
-                else:
-                    # 使用原始版本（从v2导入）
-                    from e3_gnn_encoder_v2 import AngleMessagePassing
-                    layer = AngleMessagePassing(
-                        irreps_in=self.hidden_irreps,
-                        irreps_out=self.hidden_irreps,
-                        angle_attr_dim=2,
-                        hidden_dim=64
-                    )
-                self.angle_mp_layers.append(layer)
-
-        # 3-hop dihedral message passing (IMPROVED with geometry!)
-        if use_multi_hop:
-            self.dihedral_mp_layers = nn.ModuleList()
-            for i in range(num_layers):
-                if use_geometric_mp:
-                    # 使用几何增强版本（带 LayerNorm 稳定性改进）
-                    layer = GeometricDihedralMessagePassing(
-                        irreps_in=self.hidden_irreps,
-                        irreps_out=self.hidden_irreps,
-                        dihedral_attr_dim=3,
-                        hidden_dim=64,
-                        use_geometry=True,
-                        use_layer_norm=True  # 启用 LayerNorm 提高数值稳定性
-                    )
-                else:
-                    # 使用原始版本
-                    from e3_gnn_encoder_v2 import DihedralMessagePassing
-                    layer = DihedralMessagePassing(
-                        irreps_in=self.hidden_irreps,
-                        irreps_out=self.hidden_irreps,
-                        dihedral_attr_dim=3,
-                        hidden_dim=64
-                    )
-                self.dihedral_mp_layers.append(layer)
-
-        # Non-bonded message passing (same as V2)
-        if use_nonbonded:
-            self.nonbonded_mp_layers = nn.ModuleList()
-            for i in range(num_layers):
-                layer = E3GNNMessagePassingLayer(
-                    irreps_in=self.hidden_irreps,
-                    irreps_out=self.hidden_irreps,
-                    irreps_sh="0e + 1o + 2e",
-                    num_radial_basis=num_radial_basis,
-                    radial_hidden_dim=radial_hidden_dim,
-                    edge_attr_dim=3,  # [LJ_A, LJ_B, distance]
-                    r_max=r_max,
-                    avg_num_neighbors=avg_num_neighbors,
-                    use_gate=use_gate,
                     use_sc=False,
                     use_resnet=False,
-                    use_layer_norm=use_layer_norm
+                    use_layer_norm=use_layer_norm,
+                    edge_attr_dim=3  # [LJ_A, LJ_B, distance]
                 )
                 self.nonbonded_mp_layers.append(layer)
 
@@ -404,20 +358,15 @@ class RNAPocketEncoderV3(nn.Module):
         if use_multi_hop or use_nonbonded:
             self.aggregation_layer_norms = nn.ModuleList()
             for i in range(num_layers):
-                if self.norm_type == 'rms' and self.use_improved_layers:
+                if self.norm_type == 'rms':
                     # 使用 RMSNorm from layers/ (更快)
                     self.aggregation_layer_norms.append(
                         EquivariantRMSNorm(self.hidden_irreps, affine=True)
                     )
-                elif self.use_improved_layers:
+                else:
                     # 使用 layers/ 的 LayerNorm (有 affine)
                     self.aggregation_layer_norms.append(
                         LayersEquivariantLayerNorm(self.hidden_irreps, affine=True)
-                    )
-                else:
-                    # 使用本地的 EquivariantLayerNorm (现在也有 affine)
-                    self.aggregation_layer_norms.append(
-                        EquivariantLayerNorm(self.hidden_irreps, affine=True)
                     )
 
         # Invariant feature extraction (IMPROVED!)

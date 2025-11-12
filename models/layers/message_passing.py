@@ -198,11 +198,12 @@ class ImprovedE3MessagePassingLayer(MessagePassing):
         if self.avg_num_neighbors is not None:
             x_message = x_message / (self.avg_num_neighbors ** 0.5)
 
-        # Combine
-        x = x_self + x_message
+        # Apply nonlinearity (gate or norm activation) BEFORE combining
+        # This reduces dimension from irreps_before_gate to irreps_out
+        x_message = self.nonlinearity(x_message)
 
-        # Apply nonlinearity (gate or norm activation)
-        x = self.nonlinearity(x)
+        # Combine (now both are irreps_out dimension)
+        x = x_self + x_message
 
         # Residual connection
         if self.use_resnet:
