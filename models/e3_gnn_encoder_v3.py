@@ -17,7 +17,6 @@ E(3) Equivariant GNN Encoder - Version 3.0 (Improved)
     model = RNAPocketEncoderV3(
         output_dim=512,
         num_layers=4,
-        use_geometric_mp=True,
         use_enhanced_invariants=True,
         use_improved_layers=True,  # 使用 layers/ 改进组件
     )
@@ -55,11 +54,21 @@ except ImportError:
         EquivariantRMSNorm
     )
 
-# Import base embedding from V2 (only component we need from V2)
+# Import V2 components (for fallback when use_improved_layers=False)
 try:
-    from .e3_gnn_encoder_v2 import PhysicalFeatureEmbedding
+    from .e3_gnn_encoder_v2 import (
+        PhysicalFeatureEmbedding,
+        E3GNNMessagePassingLayer,
+        AngleMessagePassing,
+        DihedralMessagePassing
+    )
 except ImportError:
-    from e3_gnn_encoder_v2 import PhysicalFeatureEmbedding
+    from e3_gnn_encoder_v2 import (
+        PhysicalFeatureEmbedding,
+        E3GNNMessagePassingLayer,
+        AngleMessagePassing,
+        DihedralMessagePassing
+    )
 
 # Import improved components (geometric MP, invariants, etc.)
 try:
@@ -82,25 +91,27 @@ except ImportError:
 
 class EquivariantLayerNorm(nn.Module):
     """
-    E(3)-equivariant LayerNorm - 改进版，归一化所有特征类型
+    E(3)-equivariant LayerNorm - 改进版，更好地保留等变性
 
     策略:
     - 标量特征 (l=0): 使用标准 LayerNorm with affine parameters
-    - 向量特征 (l=1): 归一化每个向量的范数
-    - 张量特征 (l=2): 归一化每个张量的范数
+    - 向量特征 (l=1): RMSNorm 风格，保留相对幅值信息
+    - 张量特征 (l=2): RMSNorm 风格，保留相对幅值信息
 
-    这样既保持了E(3)等变性，又防止了特征幅值爆炸
-
-    改进: 添加可学习的 affine 参数 (scale/shift)
+    关键改进：
+    1. 向量/张量使用 RMS 归一化而非完全归一化到相同范数
+    2. 保留幅值信息，避免信息丢失
+    3. 可学习的 scale 参数控制归一化强度
     """
     def __init__(self, irreps, normalize_vectors=True, normalize_tensors=True,
-                 affine=True, eps=1e-5):
+                 affine=True, eps=1e-5, use_rms_for_vectors=True):
         super().__init__()
         self.irreps = o3.Irreps(irreps)
         self.normalize_vectors = normalize_vectors
         self.normalize_tensors = normalize_tensors
         self.affine = affine
         self.eps = eps
+        self.use_rms_for_vectors = use_rms_for_vectors
 
         # 找到所有特征的位置
         self.scalar_indices = []
@@ -164,25 +175,41 @@ class EquivariantLayerNorm(nn.Module):
 
             x_norm[:, self.scalar_indices] = scalar_features_norm
 
-        # 2. 归一化向量范数 (保持方向，缩放幅值)
+        # 2. 归一化向量范数 (RMSNorm 风格，保留更多幅值信息)
         if self.normalize_vectors and len(self.vector_slices) > 0:
-            for start, end in self.vector_slices:
-                vec = x[:, start:end]  # [num_atoms, 3]
-                norm = torch.linalg.norm(vec, dim=-1, keepdim=True).clamp(min=1e-6)
-                # 归一化到单位范数，然后乘以可学习的缩放因子
-                # 这里使用均值范数作为目标
-                mean_norm = norm.mean()
-                vec_normalized = vec / norm * mean_norm
-                x_norm[:, start:end] = vec_normalized
+            if self.use_rms_for_vectors:
+                # RMSNorm: 除以 RMS，保留相对幅值
+                for start, end in self.vector_slices:
+                    vec = x[:, start:end]  # [num_atoms, 3]
+                    rms = torch.sqrt((vec ** 2).mean(dim=-1, keepdim=True) + self.eps)
+                    vec_normalized = vec / rms
+                    x_norm[:, start:end] = vec_normalized
+            else:
+                # 原来的方法: 归一化到平均范数
+                for start, end in self.vector_slices:
+                    vec = x[:, start:end]  # [num_atoms, 3]
+                    norm = torch.linalg.norm(vec, dim=-1, keepdim=True).clamp(min=self.eps)
+                    mean_norm = norm.mean()
+                    vec_normalized = vec / norm * mean_norm
+                    x_norm[:, start:end] = vec_normalized
 
-        # 3. 归一化张量范数 (保持方向，缩放幅值)
+        # 3. 归一化张量范数 (RMSNorm 风格，保留更多幅值信息)
         if self.normalize_tensors and len(self.tensor_slices) > 0:
-            for start, end in self.tensor_slices:
-                tensor = x[:, start:end]  # [num_atoms, 5]
-                norm = torch.linalg.norm(tensor, dim=-1, keepdim=True).clamp(min=1e-6)
-                mean_norm = norm.mean()
-                tensor_normalized = tensor / norm * mean_norm
-                x_norm[:, start:end] = tensor_normalized
+            if self.use_rms_for_vectors:
+                # RMSNorm: 除以 RMS，保留相对幅值
+                for start, end in self.tensor_slices:
+                    tensor = x[:, start:end]  # [num_atoms, 5]
+                    rms = torch.sqrt((tensor ** 2).mean(dim=-1, keepdim=True) + self.eps)
+                    tensor_normalized = tensor / rms
+                    x_norm[:, start:end] = tensor_normalized
+            else:
+                # 原来的方法: 归一化到平均范数
+                for start, end in self.tensor_slices:
+                    tensor = x[:, start:end]  # [num_atoms, 5]
+                    norm = torch.linalg.norm(tensor, dim=-1, keepdim=True).clamp(min=self.eps)
+                    mean_norm = norm.mean()
+                    tensor_normalized = tensor / norm * mean_norm
+                    x_norm[:, start:end] = tensor_normalized
 
         return x_norm
 
@@ -224,7 +251,6 @@ class RNAPocketEncoderV3(nn.Module):
         num_attention_heads=4,  # For multihead attention
         dropout=0.0,
         # V3新增参数
-        use_geometric_mp=True,  # 是否使用几何增强的MP
         use_enhanced_invariants=True,  # 是否使用增强的不变量提取
         use_improved_layers=True,  # 是否使用 layers/ 改进组件 (NEW!)
         norm_type='layer',  # 'layer' or 'rms' (NEW!)
@@ -235,7 +261,6 @@ class RNAPocketEncoderV3(nn.Module):
     ):
         """
         Args:
-            use_geometric_mp: 是否在角度/二面角MP中使用几何信息
             use_enhanced_invariants: 是否使用增强的不变量提取(204维 vs 56维)
             use_improved_layers: 是否使用 layers/ 改进组件 (Bessel+Cutoff+ImprovedMP)
             norm_type: 归一化类型 ('layer' 或 'rms')
@@ -254,30 +279,23 @@ class RNAPocketEncoderV3(nn.Module):
         self.dropout = dropout
         self.use_multi_hop = use_multi_hop
         self.use_nonbonded = use_nonbonded
-        self.use_geometric_mp = use_geometric_mp
         self.use_enhanced_invariants = use_enhanced_invariants
         self.use_improved_layers = use_improved_layers  # V3 always uses improved layers
         self.norm_type = norm_type
 
-        # Learnable combining weights (使用 log-space 参数化防止无限增长)
-        # 使用 sigmoid 约束到 [0, 1] 范围
-        # 从权重空间转换到log-space: logit(w) = log(w / (1-w))
+        # Fixed combining weights (不可学习，用户设定)
+        # 改进：使用固定权重避免可学习权重与特征梯度的耦合
         if use_multi_hop:
-            # 将初始权重从 [0, 1] 转换到 log-space
-            # 裁剪到 [0.01, 0.99] 避免log(0)或log(∞)
-            angle_w_clipped = max(0.01, min(0.99, initial_angle_weight))
-            dihedral_w_clipped = max(0.01, min(0.99, initial_dihedral_weight))
-
-            angle_logit = torch.log(torch.tensor(angle_w_clipped / (1 - angle_w_clipped)))
-            dihedral_logit = torch.log(torch.tensor(dihedral_w_clipped / (1 - dihedral_w_clipped)))
-
-            self.log_angle_weight = nn.Parameter(angle_logit)
-            self.log_dihedral_weight = nn.Parameter(dihedral_logit)
+            self.angle_weight = initial_angle_weight
+            self.dihedral_weight = initial_dihedral_weight
+        else:
+            self.angle_weight = 0.0
+            self.dihedral_weight = 0.0
 
         if use_nonbonded:
-            nonbonded_w_clipped = max(0.01, min(0.99, initial_nonbonded_weight))
-            nonbonded_logit = torch.log(torch.tensor(nonbonded_w_clipped / (1 - nonbonded_w_clipped)))
-            self.log_nonbonded_weight = nn.Parameter(nonbonded_logit)
+            self.nonbonded_weight = initial_nonbonded_weight
+        else:
+            self.nonbonded_weight = 0.0
 
         # Input embedding (same as V2)
         self.input_embedding = PhysicalFeatureEmbedding(
@@ -286,57 +304,11 @@ class RNAPocketEncoderV3(nn.Module):
             output_irreps=hidden_irreps
         )
 
-        # 1-hop bonded message passing (always use improved layers)
+        # 1-hop bonded message passing (improved or basic)
         self.bonded_mp_layers = nn.ModuleList()
         for i in range(num_layers):
-            layer = ImprovedE3MessagePassingLayer(
-                irreps_in=self.hidden_irreps,
-                irreps_out=self.hidden_irreps,
-                irreps_sh="0e + 1o + 2e",
-                r_max=r_max,
-                num_radial_basis=num_radial_basis,
-                radial_hidden_dim=radial_hidden_dim,
-                avg_num_neighbors=avg_num_neighbors,
-                use_gate=use_gate,
-                use_sc=True,
-                use_resnet=True,
-                use_layer_norm=use_layer_norm,
-                edge_attr_dim=2  # [req, k]
-            )
-            self.bonded_mp_layers.append(layer)
-
-        # 2-hop angle message passing (geometric enhanced)
-        if use_multi_hop:
-            self.angle_mp_layers = nn.ModuleList()
-            for i in range(num_layers):
-                layer = GeometricAngleMessagePassing(
-                    irreps_in=self.hidden_irreps,
-                    irreps_out=self.hidden_irreps,
-                    angle_attr_dim=2,
-                    hidden_dim=64,
-                    use_geometry=use_geometric_mp,
-                    use_layer_norm=True  # 启用 LayerNorm 提高数值稳定性
-                )
-                self.angle_mp_layers.append(layer)
-
-        # 3-hop dihedral message passing (geometric enhanced)
-        if use_multi_hop:
-            self.dihedral_mp_layers = nn.ModuleList()
-            for i in range(num_layers):
-                layer = GeometricDihedralMessagePassing(
-                    irreps_in=self.hidden_irreps,
-                    irreps_out=self.hidden_irreps,
-                    dihedral_attr_dim=3,
-                    hidden_dim=64,
-                    use_geometry=use_geometric_mp,
-                    use_layer_norm=True  # 启用 LayerNorm 提高数值稳定性
-                )
-                self.dihedral_mp_layers.append(layer)
-
-        # Non-bonded message passing (improved layers)
-        if use_nonbonded:
-            self.nonbonded_mp_layers = nn.ModuleList()
-            for i in range(num_layers):
+            if self.use_improved_layers:
+                # 使用 ImprovedE3MessagePassingLayer (Bessel+Cutoff)
                 layer = ImprovedE3MessagePassingLayer(
                     irreps_in=self.hidden_irreps,
                     irreps_out=self.hidden_irreps,
@@ -346,11 +318,93 @@ class RNAPocketEncoderV3(nn.Module):
                     radial_hidden_dim=radial_hidden_dim,
                     avg_num_neighbors=avg_num_neighbors,
                     use_gate=use_gate,
-                    use_sc=False,
-                    use_resnet=False,
+                    use_sc=True,
+                    use_resnet=True,
                     use_layer_norm=use_layer_norm,
-                    edge_attr_dim=3  # [LJ_A, LJ_B, distance]
+                    edge_attr_dim=2  # [req, k]
                 )
+            else:
+                # 使用 V2 基础实现 (Gaussian RBF)
+                layer = E3GNNMessagePassingLayer(
+                    irreps_in=self.hidden_irreps,
+                    irreps_out=self.hidden_irreps,
+                    irreps_sh="0e + 1o + 2e",
+                    num_radial_basis=num_radial_basis,
+                    radial_hidden_dim=radial_hidden_dim,
+                    edge_attr_dim=2,  # [req, k]
+                    r_max=r_max,
+                    avg_num_neighbors=avg_num_neighbors,
+                    use_gate=use_gate,
+                    use_sc=True,
+                    use_resnet=True,
+                    use_layer_norm=use_layer_norm
+                )
+            self.bonded_mp_layers.append(layer)
+
+        # 2-hop angle message passing (geometric enhanced, always enabled)
+        if use_multi_hop:
+            self.angle_mp_layers = nn.ModuleList()
+            for i in range(num_layers):
+                layer = GeometricAngleMessagePassing(
+                    irreps_in=self.hidden_irreps,
+                    irreps_out=self.hidden_irreps,
+                    angle_attr_dim=2,
+                    hidden_dim=64,
+                    use_geometry=True,  # V3 always uses geometric features
+                    use_layer_norm=True  # 启用 LayerNorm 提高数值稳定性
+                )
+                self.angle_mp_layers.append(layer)
+
+        # 3-hop dihedral message passing (geometric enhanced, always enabled)
+        if use_multi_hop:
+            self.dihedral_mp_layers = nn.ModuleList()
+            for i in range(num_layers):
+                layer = GeometricDihedralMessagePassing(
+                    irreps_in=self.hidden_irreps,
+                    irreps_out=self.hidden_irreps,
+                    dihedral_attr_dim=3,
+                    hidden_dim=64,
+                    use_geometry=True,  # V3 always uses geometric features
+                    use_layer_norm=True  # 启用 LayerNorm 提高数值稳定性
+                )
+                self.dihedral_mp_layers.append(layer)
+
+        # Non-bonded message passing (improved or basic)
+        if use_nonbonded:
+            self.nonbonded_mp_layers = nn.ModuleList()
+            for i in range(num_layers):
+                if self.use_improved_layers:
+                    # 使用 ImprovedE3MessagePassingLayer (Bessel+Cutoff)
+                    layer = ImprovedE3MessagePassingLayer(
+                        irreps_in=self.hidden_irreps,
+                        irreps_out=self.hidden_irreps,
+                        irreps_sh="0e + 1o + 2e",
+                        r_max=r_max,
+                        num_radial_basis=num_radial_basis,
+                        radial_hidden_dim=radial_hidden_dim,
+                        avg_num_neighbors=avg_num_neighbors,
+                        use_gate=use_gate,
+                        use_sc=False,
+                        use_resnet=False,
+                        use_layer_norm=use_layer_norm,
+                        edge_attr_dim=3  # [LJ_A, LJ_B, distance]
+                    )
+                else:
+                    # 使用 V2 基础实现 (Gaussian RBF)
+                    layer = E3GNNMessagePassingLayer(
+                        irreps_in=self.hidden_irreps,
+                        irreps_out=self.hidden_irreps,
+                        irreps_sh="0e + 1o + 2e",
+                        num_radial_basis=num_radial_basis,
+                        radial_hidden_dim=radial_hidden_dim,
+                        edge_attr_dim=3,  # [LJ_A, LJ_B, distance]
+                        r_max=r_max,
+                        avg_num_neighbors=avg_num_neighbors,
+                        use_gate=use_gate,
+                        use_sc=False,
+                        use_resnet=False,
+                        use_layer_norm=use_layer_norm
+                    )
                 self.nonbonded_mp_layers.append(layer)
 
         # LayerNorm for stabilizing multi-hop aggregation (防止特征幅值爆炸)
@@ -358,15 +412,27 @@ class RNAPocketEncoderV3(nn.Module):
         if use_multi_hop or use_nonbonded:
             self.aggregation_layer_norms = nn.ModuleList()
             for i in range(num_layers):
-                if self.norm_type == 'rms':
-                    # 使用 RMSNorm from layers/ (更快)
-                    self.aggregation_layer_norms.append(
-                        EquivariantRMSNorm(self.hidden_irreps, affine=True)
-                    )
+                if self.use_improved_layers:
+                    # 使用 layers/ 的改进版本
+                    if self.norm_type == 'rms':
+                        # RMSNorm (更快)
+                        self.aggregation_layer_norms.append(
+                            EquivariantRMSNorm(self.hidden_irreps, affine=True)
+                        )
+                    else:
+                        # LayerNorm with affine
+                        self.aggregation_layer_norms.append(
+                            LayersEquivariantLayerNorm(self.hidden_irreps, affine=True)
+                        )
                 else:
-                    # 使用 layers/ 的 LayerNorm (有 affine)
+                    # 使用本地的基础 EquivariantLayerNorm
                     self.aggregation_layer_norms.append(
-                        LayersEquivariantLayerNorm(self.hidden_irreps, affine=True)
+                        EquivariantLayerNorm(
+                            self.hidden_irreps,
+                            normalize_vectors=True,
+                            normalize_tensors=True,
+                            affine=True
+                        )
                     )
 
         # Invariant feature extraction (IMPROVED!)
@@ -436,27 +502,6 @@ class RNAPocketEncoderV3(nn.Module):
                     self.irreps_slices['l2'].append((idx, idx + dim))
                 idx += dim
 
-    @property
-    def angle_weight(self):
-        """返回约束后的角度权重 (范围: [0, 1])"""
-        if hasattr(self, 'log_angle_weight'):
-            return torch.sigmoid(self.log_angle_weight)
-        return torch.tensor(0.0, device=self.log_angle_weight.device if hasattr(self, 'log_angle_weight') else 'cpu')
-
-    @property
-    def dihedral_weight(self):
-        """返回约束后的二面角权重 (范围: [0, 1])"""
-        if hasattr(self, 'log_dihedral_weight'):
-            return torch.sigmoid(self.log_dihedral_weight)
-        return torch.tensor(0.0, device=self.log_dihedral_weight.device if hasattr(self, 'log_dihedral_weight') else 'cpu')
-
-    @property
-    def nonbonded_weight(self):
-        """返回约束后的非键权重 (范围: [0, 1])"""
-        if hasattr(self, 'log_nonbonded_weight'):
-            return torch.sigmoid(self.log_nonbonded_weight)
-        return torch.tensor(0.0, device=self.log_nonbonded_weight.device if hasattr(self, 'log_nonbonded_weight') else 'cpu')
-
     def extract_invariant_features(self, h):
         """Extract E(3) invariant features (original version for V2 compatibility)"""
         if self.invariant_extractor is not None:
@@ -507,46 +552,37 @@ class RNAPocketEncoderV3(nn.Module):
         # Initial embedding
         h = self.input_embedding(x)
 
-        # Message passing layers
+        # Message passing layers with Pre-LN architecture
         for i in range(self.num_layers):
-            h_new = h
+            # Pre-LN: 先归一化再应用 MP
+            if (self.use_multi_hop or self.use_nonbonded) and hasattr(self, 'aggregation_layer_norms'):
+                h_normalized = self.aggregation_layer_norms[i](h)
+            else:
+                h_normalized = h
 
             # 1-hop bonded
-            h_bonded = self.bonded_mp_layers[i](h, pos, edge_index, edge_attr)
+            h_bonded = self.bonded_mp_layers[i](h_normalized, pos, edge_index, edge_attr)
             h_new = h_bonded
 
-            # 2-hop angles
+            # 2-hop angles (geometric features enabled)
             if self.use_multi_hop and hasattr(data, 'triple_index'):
-                if self.use_geometric_mp:
-                    # 传入pos用于几何计算
-                    h_angle = self.angle_mp_layers[i](h, pos, data.triple_index, data.triple_attr)
-                else:
-                    # 原始版本不需要pos
-                    h_angle = self.angle_mp_layers[i](h, data.triple_index, data.triple_attr)
+                h_angle = self.angle_mp_layers[i](h_normalized, pos, data.triple_index, data.triple_attr)
                 h_new = h_new + self.angle_weight * h_angle
 
-            # 3-hop dihedrals
+            # 3-hop dihedrals (geometric features enabled)
             if self.use_multi_hop and hasattr(data, 'quadra_index'):
-                if self.use_geometric_mp:
-                    # 传入pos用于几何计算
-                    h_dihedral = self.dihedral_mp_layers[i](h, pos, data.quadra_index, data.quadra_attr)
-                else:
-                    # 原始版本不需要pos
-                    h_dihedral = self.dihedral_mp_layers[i](h, data.quadra_index, data.quadra_attr)
+                h_dihedral = self.dihedral_mp_layers[i](h_normalized, pos, data.quadra_index, data.quadra_attr)
                 h_new = h_new + self.dihedral_weight * h_dihedral
 
             # Non-bonded
             if self.use_nonbonded and hasattr(data, 'nonbonded_edge_index'):
                 h_nonbonded = self.nonbonded_mp_layers[i](
-                    h, pos, data.nonbonded_edge_index, data.nonbonded_edge_attr
+                    h_normalized, pos, data.nonbonded_edge_index, data.nonbonded_edge_attr
                 )
                 h_new = h_new + self.nonbonded_weight * h_nonbonded
 
-            # Apply LayerNorm to stabilize aggregated features (防止幅值爆炸)
-            if (self.use_multi_hop or self.use_nonbonded) and hasattr(self, 'aggregation_layer_norms'):
-                h = self.aggregation_layer_norms[i](h_new)
-            else:
-                h = h_new
+            # 残差连接 (Pre-LN 的关键)
+            h = h + h_new
 
             # Dropout on scalars only
             if self.dropout > 0 and self.training:
@@ -616,17 +652,11 @@ class RNAPocketEncoderV3(nn.Module):
             h_new = h_bonded
 
             if self.use_multi_hop and hasattr(data, 'triple_index'):
-                if self.use_geometric_mp:
-                    h_angle = self.angle_mp_layers[i](h, pos, data.triple_index, data.triple_attr)
-                else:
-                    h_angle = self.angle_mp_layers[i](h, data.triple_index, data.triple_attr)
+                h_angle = self.angle_mp_layers[i](h, pos, data.triple_index, data.triple_attr)
                 h_new = h_new + self.angle_weight * h_angle
 
             if self.use_multi_hop and hasattr(data, 'quadra_index'):
-                if self.use_geometric_mp:
-                    h_dihedral = self.dihedral_mp_layers[i](h, pos, data.quadra_index, data.quadra_attr)
-                else:
-                    h_dihedral = self.dihedral_mp_layers[i](h, data.quadra_index, data.quadra_attr)
+                h_dihedral = self.dihedral_mp_layers[i](h, pos, data.quadra_index, data.quadra_attr)
                 h_new = h_new + self.dihedral_weight * h_dihedral
 
             if self.use_nonbonded and hasattr(data, 'nonbonded_edge_index'):
@@ -644,30 +674,17 @@ class RNAPocketEncoderV3(nn.Module):
 
     def get_weight_stats(self):
         """
-        获取可学习权重的统计信息 (用于监控)
+        获取固定权重的统计信息 (用于监控)
 
         Returns:
-            dict: 包含权重值、梯度、log空间参数等信息
+            dict: 包含权重值（固定值，不可学习）
         """
         stats = {}
 
-        if hasattr(self, 'log_angle_weight'):
-            stats['angle_weight'] = self.angle_weight.item()
-            stats['log_angle_weight'] = self.log_angle_weight.item()
-            if self.log_angle_weight.grad is not None:
-                stats['angle_weight_grad'] = self.log_angle_weight.grad.item()
-
-        if hasattr(self, 'log_dihedral_weight'):
-            stats['dihedral_weight'] = self.dihedral_weight.item()
-            stats['log_dihedral_weight'] = self.log_dihedral_weight.item()
-            if self.log_dihedral_weight.grad is not None:
-                stats['dihedral_weight_grad'] = self.log_dihedral_weight.grad.item()
-
-        if hasattr(self, 'log_nonbonded_weight'):
-            stats['nonbonded_weight'] = self.nonbonded_weight.item()
-            stats['log_nonbonded_weight'] = self.log_nonbonded_weight.item()
-            if self.log_nonbonded_weight.grad is not None:
-                stats['nonbonded_weight_grad'] = self.log_nonbonded_weight.grad.item()
+        # 固定权重，无梯度
+        stats['angle_weight'] = self.angle_weight
+        stats['dihedral_weight'] = self.dihedral_weight
+        stats['nonbonded_weight'] = self.nonbonded_weight
 
         return stats
 
@@ -698,19 +715,13 @@ class RNAPocketEncoderV3(nn.Module):
 
             # 2-hop
             if self.use_multi_hop and hasattr(data, 'triple_index'):
-                if self.use_geometric_mp:
-                    h_angle = self.angle_mp_layers[i](h, pos, data.triple_index, data.triple_attr)
-                else:
-                    h_angle = self.angle_mp_layers[i](h, data.triple_index, data.triple_attr)
+                h_angle = self.angle_mp_layers[i](h, pos, data.triple_index, data.triple_attr)
                 layer_stats['angle_norm'] = torch.linalg.norm(h_angle, dim=-1).mean().item()
                 h_new = h_new + self.angle_weight * h_angle
 
             # 3-hop
             if self.use_multi_hop and hasattr(data, 'quadra_index'):
-                if self.use_geometric_mp:
-                    h_dihedral = self.dihedral_mp_layers[i](h, pos, data.quadra_index, data.quadra_attr)
-                else:
-                    h_dihedral = self.dihedral_mp_layers[i](h, data.quadra_index, data.quadra_attr)
+                h_dihedral = self.dihedral_mp_layers[i](h, pos, data.quadra_index, data.quadra_attr)
                 layer_stats['dihedral_norm'] = torch.linalg.norm(h_dihedral, dim=-1).mean().item()
                 h_new = h_new + self.dihedral_weight * h_dihedral
 
@@ -813,24 +824,8 @@ if __name__ == "__main__":
     print(f"Node embeddings: {node_emb.shape}")
     print(f"Invariant dim: {model_v3.invariant_dim}")
 
-    # Test V3 without improvements (should be similar to V2)
-    print("\nTest 2: V3 with improvements disabled (V2-like)")
-    print("-" * 80)
-    model_v2_like = RNAPocketEncoderV3(
-        output_dim=512,
-        num_layers=4,
-        use_geometric_mp=False,
-        use_enhanced_invariants=False,
-        pooling_type='attention'
-    )
-
-    output2 = model_v2_like(data)
-    print(f"Output: {output2.shape}")
-    print(f"Invariant dim: {model_v2_like.invariant_dim}")
-    print(f"✓ V2-compatible mode works!")
-
     # Test batched data
-    print("\nTest 3: Batched data")
+    print("\nTest 2: Batched data")
     print("-" * 80)
     batch_data = Batch.from_data_list([data, data, data])
     batch_output = model_v3(batch_data)
@@ -839,7 +834,7 @@ if __name__ == "__main__":
     print(f"✓ Batch processing works!")
 
     # Test physics loss
-    print("\nTest 4: Physics constraint loss")
+    print("\nTest 3: Physics constraint loss")
     print("-" * 80)
     physics_loss_fn = PhysicsConstraintLoss(
         use_bond=True,

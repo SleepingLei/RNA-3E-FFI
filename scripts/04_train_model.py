@@ -786,7 +786,6 @@ def train_worker(rank, world_size, args):
         ModelClass = RNAPocketEncoderV3
         if is_main_process:
             print("Using RNAPocketEncoderV3 (geometric MP + enhanced invariants)")
-            print(f"  Geometric MP: {args.use_geometric_mp}")
             print(f"  Enhanced invariants: {args.use_enhanced_invariants} (204-dim vs 56-dim)")
             print(f"  Improved layers: {args.use_improved_layers} (Bessel+Cutoff+ImprovedMP)")
             print(f"  Norm type: {args.norm_type}")
@@ -812,7 +811,6 @@ def train_worker(rank, world_size, args):
             pooling_type=v3_pooling_type,
             dropout=args.dropout,
             # V3-specific parameters
-            use_geometric_mp=args.use_geometric_mp,
             use_enhanced_invariants=args.use_enhanced_invariants,
             num_attention_heads=args.num_attention_heads,
             # Learnable weight initial values
@@ -1332,8 +1330,6 @@ def main():
     # V3 model arguments (advanced improvements)
     parser.add_argument("--use_v3_model", action="store_true", default=False,
                         help="Use V3 model with geometric MP, enhanced invariants, and multi-head attention")
-    parser.add_argument("--use_geometric_mp", action="store_true", default=True,
-                        help="Use geometric angle/dihedral message passing (V3 only)")
     parser.add_argument("--use_enhanced_invariants", action="store_true", default=False,
                         help="Use enhanced invariant feature extraction 204-dim (V3 only)")
     parser.add_argument("--use_improved_layers", action="store_true", default=False,
