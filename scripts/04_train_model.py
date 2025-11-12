@@ -1315,7 +1315,7 @@ def main():
     # v2.0 specific arguments
     parser.add_argument("--use_multi_hop", action="store_true", default=False,
                         help="Enable multi-hop message passing (2-hop angles, 3-hop dihedrals)")
-    parser.add_argument("--use_nonbonded", action="store_true", default=True,
+    parser.add_argument("--use_nonbonded", action="store_true", default=False,
                         help="Enable non-bonded interactions")
     parser.add_argument("--use_weight_constraints", action="store_true", default=False,
                         help="Use fixed version with weight constraints to prevent weights from going to zero")
@@ -1334,7 +1334,7 @@ def main():
                         help="Use V3 model with geometric MP, enhanced invariants, and multi-head attention")
     parser.add_argument("--use_geometric_mp", action="store_true", default=True,
                         help="Use geometric angle/dihedral message passing (V3 only)")
-    parser.add_argument("--use_enhanced_invariants", action="store_true", default=True,
+    parser.add_argument("--use_enhanced_invariants", action="store_true", default=False,
                         help="Use enhanced invariant feature extraction 204-dim (V3 only)")
     parser.add_argument("--use_improved_layers", action="store_true", default=False,
                         help="Use improved layers from layers/ (Bessel+Cutoff+ImprovedMP, V3 only)")
@@ -1374,7 +1374,7 @@ def main():
     parser.add_argument("--scheduler", type=str, default="plateau",
                         choices=["plateau", "cosine"],
                         help="Learning rate scheduler")
-    parser.add_argument("--patience", type=int, default=100,
+    parser.add_argument("--patience", type=int, default=30,
                         help="Early stopping patience")
     parser.add_argument("--num_workers", type=int, default=1,
                         help="Number of data loader workers")
@@ -1391,7 +1391,7 @@ def main():
     parser.add_argument("--use_physics_loss", action="store_true", default=False,
                         help="[NOT RECOMMENDED] Enable physics constraint loss (bond/angle/dihedral energies). "
                              "This adds extra complexity without clear benefits for representation learning.")
-    parser.add_argument("--physics_weight", type=float, default=0.1,
+    parser.add_argument("--physics_weight", type=float, default=0.3,
                         help="Weight for physics constraint loss (default: 0.1, only used if --use_physics_loss is set)")
     parser.add_argument("--physics_use_bond", action="store_true", default=True,
                         help="Include bond stretching energy in physics loss")

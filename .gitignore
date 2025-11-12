@@ -85,5 +85,5 @@ archive/
 docs/
 nohup.out
 .*md
-./albation*
+./ablation_results/
 *out
