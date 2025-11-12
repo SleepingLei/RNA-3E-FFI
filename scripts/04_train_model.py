@@ -468,13 +468,13 @@ def train_epoch(model, loader, optimizer, device, loss_fn='cosine',
         weight_stats = model_for_weights.get_weight_stats()
         metrics.update(weight_stats)
     else:
-        # 后备方案：直接访问属性
+        # 后备方案：直接访问属性（现在是固定值，不是 nn.Parameter）
         if hasattr(model_for_weights, 'angle_weight'):
-            metrics['angle_weight'] = model_for_weights.angle_weight.item()
+            metrics['angle_weight'] = model_for_weights.angle_weight
         if hasattr(model_for_weights, 'dihedral_weight'):
-            metrics['dihedral_weight'] = model_for_weights.dihedral_weight.item()
+            metrics['dihedral_weight'] = model_for_weights.dihedral_weight
         if hasattr(model_for_weights, 'nonbonded_weight'):
-            metrics['nonbonded_weight'] = model_for_weights.nonbonded_weight.item()
+            metrics['nonbonded_weight'] = model_for_weights.nonbonded_weight
 
     return metrics
 
@@ -869,10 +869,10 @@ def train_worker(rank, world_size, args):
         print(f"  Non-bonded: {args.use_nonbonded}")
         print(f"  Pooling: {args.pooling_type}")
         if args.use_multi_hop:
-            print(f"  Initial angle weight: {model_for_params.angle_weight.item():.3f}")
-            print(f"  Initial dihedral weight: {model_for_params.dihedral_weight.item():.3f}")
+            print(f"  Initial angle weight: {model_for_params.angle_weight:.3f}")
+            print(f"  Initial dihedral weight: {model_for_params.dihedral_weight:.3f}")
         if args.use_nonbonded:
-            print(f"  Initial nonbonded weight: {model_for_params.nonbonded_weight.item():.3f}")
+            print(f"  Initial nonbonded weight: {model_for_params.nonbonded_weight:.3f}")
 
     # Initialize optimizer
     if args.optimizer == "adamw":
@@ -895,7 +895,7 @@ def train_worker(rank, world_size, args):
             T_max=args.num_epochs,
             eta_min=args.lr * 0.01
         )
-    else:
+    elif args.scheduler == "plateau":
         scheduler = ReduceLROnPlateau(
             optimizer,
             mode='min',
@@ -903,6 +903,8 @@ def train_worker(rank, world_size, args):
             patience=5,
             verbose=is_main_process
         )
+    else:  # args.scheduler == "none"
+        scheduler = None
 
     # Initialize GradScaler for mixed precision training
     scaler = GradScaler() if args.use_amp else None
@@ -1148,10 +1150,11 @@ def train_worker(rank, world_size, args):
             print(val_str)
 
         # Update learning rate
-        if args.scheduler == "plateau":
-            scheduler.step(val_loss)
-        else:
-            scheduler.step()
+        if scheduler is not None:
+            if args.scheduler == "plateau":
+                scheduler.step(val_loss)
+            else:
+                scheduler.step()
 
         if is_main_process:
             current_lr = optimizer.param_groups[0]['lr']
@@ -1267,13 +1270,13 @@ def train_worker(rank, world_size, args):
                     print(f"    Log-space param: {final_stats['log_nonbonded_weight']:.4f}")
                     print(f"    Change:          {final_stats['nonbonded_weight'] - 0.5:+.4f}")
             else:
-                # 后备方案
+                # 后备方案（固定权重，不可学习）
                 if hasattr(model_for_params, 'angle_weight'):
-                    print(f"  Angle weight: {model_for_params.angle_weight.item():.4f} (initial: 0.500)")
+                    print(f"  Angle weight: {model_for_params.angle_weight:.4f} (fixed)")
                 if hasattr(model_for_params, 'dihedral_weight'):
-                    print(f"  Dihedral weight: {model_for_params.dihedral_weight.item():.4f} (initial: 0.500)")
+                    print(f"  Dihedral weight: {model_for_params.dihedral_weight:.4f} (fixed)")
                 if hasattr(model_for_params, 'nonbonded_weight'):
-                    print(f"  Nonbonded weight: {model_for_params.nonbonded_weight.item():.4f} (initial: 0.500)")
+                    print(f"  Nonbonded weight: {model_for_params.nonbonded_weight:.4f} (fixed)")
 
             print("=" * 60)
 
@@ -1368,8 +1371,8 @@ def main():
                         choices=["adam", "adamw"],
                         help="Optimizer type")
     parser.add_argument("--scheduler", type=str, default="plateau",
-                        choices=["plateau", "cosine"],
-                        help="Learning rate scheduler")
+                        choices=["plateau", "cosine", "none"],
+                        help="Learning rate scheduler (use 'none' for constant LR)")
     parser.add_argument("--patience", type=int, default=30,
                         help="Early stopping patience")
     parser.add_argument("--num_workers", type=int, default=1,
