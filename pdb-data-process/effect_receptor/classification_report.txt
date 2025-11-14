@@ -1,0 +1,31 @@
+RECEPTOR CLASSIFICATION REPORT
+================================================================================
+
+Total ligand files processed: 4
+Successfully classified: 4
+Receptor not found: 0
+Errors: 0
+
+DETAILED RESULTS BY CLASSIFICATION
+--------------------------------------------------------------------------------
+
+
+RNA: 2 files
+----------------------------------------
+100D-assembly1                 C, DC, DG, G
+101D-assembly1                 DA, DC, DG, DT
+
+Protein: 2 files
+----------------------------------------
+101M-assembly1                 ALA, ARG, ASN, ASP, GLN, GLU, GLY, HID, HIE, ILE, LEU, LYS, MET, PHE, PRO, SER, THR, TRP, TYR, VAL
+102L-assembly1                 ALA, ARG, ASN, ASP, GLN, GLU, GLY, HID, ILE, LEU, LYS, MET, PHE, PRO, SER, THR, TRP, TYR, VAL
+
+
+SUMMARY STATISTICS
+--------------------------------------------------------------------------------
+Classification       Count           Percentage     
+--------------------------------------------------------------------------------
+RNA                  2                50.00%
+Protein              2                50.00%
+--------------------------------------------------------------------------------
+Total                4               100.00%
