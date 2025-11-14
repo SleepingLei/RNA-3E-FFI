@@ -87,4 +87,5 @@ nohup.out
 .*md
 ./ablation_results/
 *out
-pdb-data-process/
+pdb-data-process/processed_ligands
+pdb-data-process/processed_polymers_fixed

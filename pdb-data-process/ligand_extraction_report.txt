@@ -1,0 +1,25 @@
+LIGAND EXTRACTION REPORT
+================================================================================
+
+Total files processed: 5
+Successfully processed: 4
+Files with no effective molecules: 1
+Errors: 0
+
+DETAILED RESULTS
+--------------------------------------------------------------------------------
+
+
+0 effective molecule(s): 1 files
+----------------------------------------
+104L-assembly1_ligands.pdb               None
+
+1 effective molecule(s): 3 files
+----------------------------------------
+100D-assembly1_ligands.pdb               SPM
+101M-assembly1_ligands.pdb               NBN
+102L-assembly1_ligands.pdb               BME
+
+2 effective molecule(s): 1 files
+----------------------------------------
+101D-assembly1_ligands.pdb               CBR, NT
