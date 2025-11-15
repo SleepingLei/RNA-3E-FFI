@@ -176,10 +176,6 @@ def main():
 
     print(f"Found {len(pdb_files)} PDB files to process\n")
 
-    if len(pdb_files) == 0:
-        print("No PDB files found!")
-        return
-
     # Prepare arguments for multiprocessing
     process_args = [
         (pdb_file, exclude_molecules, input_dir, output_base)

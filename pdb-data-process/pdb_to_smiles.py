@@ -105,13 +105,13 @@ def main():
     parser = argparse.ArgumentParser(
         description='Convert PDB files to SMILES with pH correction'
     )
-    parser.add_argument('--input-dir', default='processed_ligands_effect_1',
+    parser.add_argument('--input-dir', default='extracted_ligands/processed_ligands_effect_1',
                         help='Input directory containing PDB files')
     parser.add_argument('--output-csv', default='ligands_smiles.csv',
                         help='Output CSV file')
     parser.add_argument('--ph', type=float, default=7.4,
                         help='pH value for correction (default: 7.4)')
-    parser.add_argument('--workers', type=int, default=None,
+    parser.add_argument('--workers', type=int, default=32,
                         help='Number of worker processes (default: CPU count)')
 
     args = parser.parse_args()
@@ -119,16 +119,6 @@ def main():
     input_dir = args.input_dir
     output_csv = args.output_csv
     ph = args.ph
-
-    # Check obabel availability
-    try:
-        subprocess.run(['obabel', '--version'], capture_output=True, check=True)
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        print("Error: OpenBabel (obabel) not found. Please install it:")
-        print("  conda install -c conda-forge openbabel")
-        print("  or")
-        print("  brew install open-babel  # macOS")
-        return
 
     # Get all PDB files
     if not os.path.exists(input_dir):

@@ -2,10 +2,10 @@
 # 快速运行脚本 - 分类和复制受体文件
 
 # 设置默认参数
-LIGAND_DIR="processed_ligands_effect_1"
+LIGAND_DIR="extracted_ligands/processed_ligands_effect_1"
 RECEPTOR_DIR="processed_polymers_fixed"
 OUTPUT_DIR="effect_receptor"
-WORKERS=$(python3 -c "import multiprocessing; print(multiprocessing.cpu_count())")
+WORKERS=$(python3 -c "import multiprocessing; print(multiprocessing.cpu_count() -10 )")
 ALL_LIGAND_DIRS=false
 
 # 解析命令行参数

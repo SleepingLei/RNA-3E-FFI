@@ -4,8 +4,8 @@
 # 设置默认参数
 INPUT_DIR="processed_ligands"
 EXCLUDE_FILE="processed_ligands/exclude_molecules.txt"
-OUTPUT_BASE="."
-WORKERS=$(python3 -c "import multiprocessing; print(multiprocessing.cpu_count())")
+OUTPUT_BASE="./extracted_ligands"
+WORKERS=$(python3 -c "import multiprocessing; print(multiprocessing.cpu_count() -10)")
 
 # 打印配置信息
 echo "================================"

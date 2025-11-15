@@ -4,7 +4,7 @@
 INPUT_DIR="${1:-processed_ligands_effect_1}"
 OUTPUT_CSV="${2:-ligands_smiles.csv}"
 PH="${3:-7.4}"
-WORKERS=$(python3 -c "import multiprocessing; print(multiprocessing.cpu_count())")
+WORKERS=$(python3 -c "import multiprocessing; print(multiprocessing.cpu_count() - 10)")
 
 echo "================================"
 echo "PDB 转 SMILES"
@@ -15,16 +15,6 @@ echo "pH 值: $PH"
 echo "工作进程: $WORKERS"
 echo "================================"
 echo ""
-
-# 检查 obabel 是否安装
-if ! command -v obabel &> /dev/null; then
-    echo "错误：未找到 obabel (OpenBabel)"
-    echo "请安装："
-    echo "  conda install -c conda-forge openbabel"
-    echo "  或"
-    echo "  brew install open-babel  # macOS"
-    exit 1
-fi
 
 # 运行脚本
 python3 pdb_to_smiles.py \
