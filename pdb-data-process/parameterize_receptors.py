@@ -13,8 +13,8 @@ import MDAnalysis as mda
 import parmed as pmd
 from typing import Dict, Optional, Tuple
 import json
-RNA_RESIDUES = ['A', 'C', 'G', 'U', 'A3', 'A5', 'C3', 'C5', 'G3', 'G5', 'U3', 'U5',
-                'DA', 'DC', 'DG', 'DT', 'DA3', 'DA5', 'DC3', 'DC5', 'DG3', 'DG5', 'DT3', 'DT5']
+RNA_RESIDUES = ['A', 'C', 'G', 'U', 'A3', 'A5', 'C3', 'C5', 'G3', 'G5', 'U3', 'U5']
+DNA_RESIDUES = ['DA', 'DC', 'DG', 'DT', 'DA3', 'DA5', 'DC3', 'DC5', 'DG3', 'DG5', 'DT3', 'DT5']
 MODIFIED_RNA = ['PSU', '5MU', '5MC', '1MA', '7MG', 'M2G', 'OMC', 'OMG', 'H2U',
                 '2MG', 'M7G', 'OMU', 'YYG', 'YG', '6MZ', 'IU', 'I']
 PROTEIN_RESIDUES = ['ALA', 'ARG', 'ASN', 'ASP', 'CYS', 'GLN', 'GLU', 'GLY', 'HIS',
@@ -43,10 +43,10 @@ def define_pocket_by_residues(receptor_u, ligand_resname, pocket_cutoff=5.0):
     resindices = [res.resindex for res in residues_to_include]
     pocket_atoms = receptor_u.select_atoms(f"resindex {' '.join(map(str, resindices))}")
     pocket_components = {}
-    rna_residues = [res for res in pocket_atoms.residues if res.resname in RNA_RESIDUES]
-    if rna_residues:
-        rna_resindices = [res.resindex for res in rna_residues]
-        pocket_components['rna'] = receptor_u.select_atoms(f"resindex {' '.join(map(str, rna_resindices))}")
+    nucleic_residues = [res for res in pocket_atoms.residues if res.resname in RNA_RESIDUES + DNA_RESIDUES]
+    if nucleic_residues:
+        nucleic_resindices = [res.resindex for res in nucleic_residues]
+        pocket_components['nucleic'] = receptor_u.select_atoms(f"resindex {' '.join(map(str, nucleic_resindices))}")
     mod_rna_residues = [res for res in pocket_atoms.residues if res.resname in MODIFIED_RNA]
     if mod_rna_residues:
         mod_rna_resindices = [res.resindex for res in mod_rna_residues]
@@ -60,8 +60,8 @@ def safe_run_pdb4amber(input_pdb, output_pdb, options="--dry --nohyd"):
     """Safely run pdb4amber with pre-checks."""
     try:
         parm = pmd.load_file(str(input_pdb))
-        o5_count = sum(1 for a in parm.atoms if a.name == "O5'" and a.residue.name in RNA_RESIDUES + MODIFIED_RNA)
-        o3_count = sum(1 for a in parm.atoms if a.name == "O3'" and a.residue.name in RNA_RESIDUES + MODIFIED_RNA)
+        o5_count = sum(1 for a in parm.atoms if a.name == "O5'" and a.residue.name in RNA_RESIDUES + DNA_RESIDUES + MODIFIED_RNA)
+        o3_count = sum(1 for a in parm.atoms if a.name == "O3'" and a.residue.name in RNA_RESIDUES + DNA_RESIDUES + MODIFIED_RNA)
         if o5_count > o3_count + 1:
             return input_pdb
         cmd = f"pdb4amber {options} -i {input_pdb} -o {output_pdb}"
@@ -72,15 +72,15 @@ def safe_run_pdb4amber(input_pdb, output_pdb, options="--dry --nohyd"):
             return input_pdb
     except:
         return input_pdb
-def clean_rna_terminal_atoms(input_pdb, output_pdb):
-    """Remove problematic terminal atoms from RNA fragments."""
+def clean_nucleic_terminal_atoms(input_pdb, output_pdb):
+    """Remove problematic terminal atoms from RNA/DNA fragments."""
     try:
         u = mda.Universe(str(input_pdb))
         if len(u.residues) == 0:
             return False
         chains = {}
         for residue in u.residues:
-            if residue.resname not in RNA_RESIDUES + MODIFIED_RNA:
+            if residue.resname not in RNA_RESIDUES + DNA_RESIDUES + MODIFIED_RNA:
                 continue
             chain_id = residue.segid if residue.segid else 'X'
             if chain_id not in chains:
@@ -151,28 +151,28 @@ def clean_protein_terminal_atoms(input_pdb, output_pdb):
     except:
         return False
 def clean_complex_terminal_atoms(input_pdb, output_pdb):
-    """Remove problematic terminal atoms from both RNA and protein in complex."""
+    """Remove problematic terminal atoms from both RNA/DNA and protein in complex."""
     try:
         u = mda.Universe(str(input_pdb))
         if len(u.residues) == 0:
             return False
-        rna_chains = {}
+        nucleic_chains = {}
         protein_chains = {}
         for residue in u.residues:
             chain_id = residue.segid if residue.segid else 'X'
-            if residue.resname in RNA_RESIDUES + MODIFIED_RNA:
-                if chain_id not in rna_chains:
-                    rna_chains[chain_id] = []
-                rna_chains[chain_id].append(residue)
+            if residue.resname in RNA_RESIDUES + DNA_RESIDUES + MODIFIED_RNA:
+                if chain_id not in nucleic_chains:
+                    nucleic_chains[chain_id] = []
+                nucleic_chains[chain_id].append(residue)
             elif residue.resname in PROTEIN_RESIDUES:
                 if chain_id not in protein_chains:
                     protein_chains[chain_id] = []
                 protein_chains[chain_id].append(residue)
         atoms_to_remove = []
-        # Clean RNA terminals
+        # Clean nucleic acid terminals
         atoms_to_remove_5prime = {'P', 'OP1', 'OP2', 'O5P', 'O1P', 'O2P'}
         atoms_to_remove_3prime = {"O3'", "O3*"}
-        for chain_id, residues in rna_chains.items():
+        for chain_id, residues in nucleic_chains.items():
             if len(residues) == 0:
                 continue
             first_residue = residues[0]
@@ -208,19 +208,48 @@ def clean_complex_terminal_atoms(input_pdb, output_pdb):
             return True
     except:
         return False
-def parameterize_rna(rna_atoms, output_prefix):
-    """Parameterize RNA pocket with RNA.OL3."""
+def classify_nucleic_acid_type(residues):
+    """Classify nucleic acid as DNA, RNA, or HYBRID based on residues."""
+    has_rna = any(res.resname in RNA_RESIDUES for res in residues)
+    has_dna = any(res.resname in DNA_RESIDUES for res in residues)
+
+    if has_dna and not has_rna:
+        return 'DNA'
+    elif has_rna and not has_dna:
+        return 'RNA'
+    elif has_dna and has_rna:
+        return 'HYBRID'
+    else:
+        return None
+def parameterize_nucleic(nucleic_atoms, output_prefix):
+    """Parameterize nucleic acid pocket with appropriate force field (DNA.OL15 or RNA.OL3)."""
     output_prefix.parent.mkdir(parents=True, exist_ok=True)
-    rna_pdb = output_prefix.parent / f"{output_prefix.stem}_rna.pdb"
-    rna_atoms.write(str(rna_pdb))
-    cleaned_pdb = output_prefix.parent / f"{output_prefix.stem}_rna_cleaned.pdb"
-    success = clean_rna_terminal_atoms(rna_pdb, cleaned_pdb)
+
+    # Classify as DNA, RNA, or hybrid
+    nucleic_type = classify_nucleic_acid_type(nucleic_atoms.residues)
+
+    nucleic_pdb = output_prefix.parent / f"{output_prefix.stem}_nucleic.pdb"
+    nucleic_atoms.write(str(nucleic_pdb))
+
+    cleaned_pdb = output_prefix.parent / f"{output_prefix.stem}_nucleic_cleaned.pdb"
+    success = clean_nucleic_terminal_atoms(nucleic_pdb, cleaned_pdb)
     if not success:
-        cleaned_pdb = rna_pdb
-    tleap_script = output_prefix.parent / f"{output_prefix.stem}_rna_tleap.in"
-    prmtop_file = output_prefix.parent / f"{output_prefix.stem}_rna.prmtop"
-    inpcrd_file = output_prefix.parent / f"{output_prefix.stem}_rna.inpcrd"
-    script_content = f"""source leaprc.RNA.OL3
+        cleaned_pdb = nucleic_pdb
+
+    tleap_script = output_prefix.parent / f"{output_prefix.stem}_nucleic_tleap.in"
+    prmtop_file = output_prefix.parent / f"{output_prefix.stem}_nucleic.prmtop"
+    inpcrd_file = output_prefix.parent / f"{output_prefix.stem}_nucleic.inpcrd"
+    leap_log = output_prefix.parent / f"{output_prefix.stem}_nucleic_leap.log"
+
+    # Select force field based on nucleic acid type
+    if nucleic_type == 'DNA':
+        leaprc = "source leaprc.DNA.OL15"
+    elif nucleic_type == 'RNA':
+        leaprc = "source leaprc.RNA.OL3"
+    else:  # HYBRID
+        leaprc = "source leaprc.DNA.OL15\nsource leaprc.RNA.OL3"
+
+    script_content = f"""{leaprc}
 mol = loadpdb {cleaned_pdb.name}
 set default nocenter on
 set default PBRadii mbondi3
@@ -228,6 +257,7 @@ saveamberparm mol {prmtop_file.name} {inpcrd_file.name}
 quit
 """
     tleap_script.write_text(script_content)
+
     result = subprocess.run(
         ["tleap", "-f", tleap_script.name],
         capture_output=True,
@@ -235,7 +265,12 @@ quit
         cwd=str(output_prefix.parent),
         timeout=300
     )
+
+    # Save leap log for debugging
+    leap_log.write_text(result.stdout + "\n" + result.stderr)
+
     tleap_script.unlink()
+
     if prmtop_file.exists() and inpcrd_file.exists():
         return True, prmtop_file, inpcrd_file
     else:
@@ -245,14 +280,19 @@ def parameterize_protein(protein_atoms, output_prefix):
     output_prefix.parent.mkdir(parents=True, exist_ok=True)
     protein_pdb = output_prefix.parent / f"{output_prefix.stem}_protein.pdb"
     protein_atoms.write(str(protein_pdb))
+
     cleaned_pdb = output_prefix.parent / f"{output_prefix.stem}_protein_cleaned.pdb"
     success = clean_protein_terminal_atoms(protein_pdb, cleaned_pdb)
     if not success:
         cleaned_pdb = safe_run_pdb4amber(protein_pdb, protein_pdb.with_suffix('.cleaned.pdb'))
+
     tleap_script = output_prefix.parent / f"{output_prefix.stem}_protein_tleap.in"
     prmtop_file = output_prefix.parent / f"{output_prefix.stem}_protein.prmtop"
     inpcrd_file = output_prefix.parent / f"{output_prefix.stem}_protein.inpcrd"
+    leap_log = output_prefix.parent / f"{output_prefix.stem}_protein_leap.log"
+
     script_content = f"""source leaprc.protein.ff14SB
+set default nocap on
 mol = loadpdb {cleaned_pdb.name}
 set default nocenter on
 set default PBRadii mbondi3
@@ -260,6 +300,7 @@ saveamberparm mol {prmtop_file.name} {inpcrd_file.name}
 quit
 """
     tleap_script.write_text(script_content)
+
     result = subprocess.run(
         ["tleap", "-f", tleap_script.name],
         capture_output=True,
@@ -267,27 +308,49 @@ quit
         cwd=str(output_prefix.parent),
         timeout=300
     )
+
+    # Save leap log for debugging
+    leap_log.write_text(result.stdout + "\n" + result.stderr)
+
     tleap_script.unlink()
+
     if prmtop_file.exists() and inpcrd_file.exists():
         return True, prmtop_file, inpcrd_file
     else:
         return False, None, None
-def parameterize_complex(rna_atoms, protein_atoms, output_prefix):
-    """Parameterize complex pocket with both RNA.OL3 and ff14SB."""
+def parameterize_complex(nucleic_atoms, protein_atoms, output_prefix):
+    """Parameterize complex pocket with appropriate nucleic acid and protein force fields."""
     output_prefix.parent.mkdir(parents=True, exist_ok=True)
-    # Combine RNA and protein
-    combined_atoms = rna_atoms + protein_atoms
+
+    # Classify nucleic acid type
+    nucleic_type = classify_nucleic_acid_type(nucleic_atoms.residues)
+
+    # Combine nucleic and protein
+    combined_atoms = nucleic_atoms + protein_atoms
     complex_pdb = output_prefix.parent / f"{output_prefix.stem}_complex.pdb"
     combined_atoms.write(str(complex_pdb))
+
     cleaned_pdb = output_prefix.parent / f"{output_prefix.stem}_complex_cleaned.pdb"
     success = clean_complex_terminal_atoms(complex_pdb, cleaned_pdb)
     if not success:
         cleaned_pdb = complex_pdb
+
     tleap_script = output_prefix.parent / f"{output_prefix.stem}_complex_tleap.in"
     prmtop_file = output_prefix.parent / f"{output_prefix.stem}_complex.prmtop"
     inpcrd_file = output_prefix.parent / f"{output_prefix.stem}_complex.inpcrd"
-    script_content = f"""source leaprc.RNA.OL3
+    leap_log = output_prefix.parent / f"{output_prefix.stem}_complex_leap.log"
+
+    # Select force field based on nucleic acid type
+    if nucleic_type == 'DNA':
+        leaprc_nucleic = "source leaprc.DNA.OL15"
+    elif nucleic_type == 'RNA':
+        leaprc_nucleic = "source leaprc.RNA.OL3"
+    else:  # HYBRID
+        leaprc_nucleic = "source leaprc.DNA.OL15\nsource leaprc.RNA.OL3"
+
+    script_content = f"""{leaprc_nucleic}
 source leaprc.protein.ff14SB
+set default nocap on
 mol = loadpdb {cleaned_pdb.name}
 set default nocenter on
 set default PBRadii mbondi3
@@ -295,6 +358,7 @@ saveamberparm mol {prmtop_file.name} {inpcrd_file.name}
 quit
 """
     tleap_script.write_text(script_content)
+
     result = subprocess.run(
         ["tleap", "-f", tleap_script.name],
         capture_output=True,
@@ -302,7 +366,12 @@ quit
         cwd=str(output_prefix.parent),
         timeout=300
     )
+
+    # Save leap log for debugging
+    leap_log.write_text(result.stdout + "\n" + result.stderr)
+
     tleap_script.unlink()
+
     if prmtop_file.exists() and inpcrd_file.exists():
         return True, prmtop_file, inpcrd_file
     else:
@@ -357,32 +426,32 @@ def process_single_complex(args):
             'status': 'success',
             'components': {}
         }
-        has_rna = 'rna' in pocket_components or 'modified_rna' in pocket_components
+        has_nucleic = 'nucleic' in pocket_components or 'modified_rna' in pocket_components
         has_protein = 'protein' in pocket_components
         # Parameterize based on pocket composition
-        if has_rna and has_protein:
-            # Complex: combine RNA and protein
-            rna_atoms = pocket_components.get('rna', mda.AtomGroup([], merged_u))
+        if has_nucleic and has_protein:
+            # Complex: combine nucleic acid and protein
+            nucleic_atoms = pocket_components.get('nucleic', mda.AtomGroup([], merged_u))
             if 'modified_rna' in pocket_components:
-                rna_atoms = rna_atoms + pocket_components['modified_rna']
+                nucleic_atoms = nucleic_atoms + pocket_components['modified_rna']
             protein_atoms = pocket_components['protein']
-            success, prmtop, inpcrd = parameterize_complex(rna_atoms, protein_atoms, output_prefix)
+            success, prmtop, inpcrd = parameterize_complex(nucleic_atoms, protein_atoms, output_prefix)
             result['components']['complex'] = {
                 'success': success,
-                'rna_atoms': len(rna_atoms),
+                'nucleic_atoms': len(nucleic_atoms),
                 'protein_atoms': len(protein_atoms),
                 'prmtop': str(prmtop) if prmtop else None,
                 'inpcrd': str(inpcrd) if inpcrd else None
             }
-        elif has_rna:
-            # RNA only
-            rna_atoms = pocket_components.get('rna', mda.AtomGroup([], merged_u))
+        elif has_nucleic:
+            # Nucleic acid only (RNA or DNA)
+            nucleic_atoms = pocket_components.get('nucleic', mda.AtomGroup([], merged_u))
             if 'modified_rna' in pocket_components:
-                rna_atoms = rna_atoms + pocket_components['modified_rna']
-            success, prmtop, inpcrd = parameterize_rna(rna_atoms, output_prefix)
-            result['components']['rna'] = {
+                nucleic_atoms = nucleic_atoms + pocket_components['modified_rna']
+            success, prmtop, inpcrd = parameterize_nucleic(nucleic_atoms, output_prefix)
+            result['components']['nucleic'] = {
                 'success': success,
-                'atoms': len(rna_atoms),
+                'atoms': len(nucleic_atoms),
                 'prmtop': str(prmtop) if prmtop else None,
                 'inpcrd': str(inpcrd) if inpcrd else None
             }
@@ -434,10 +503,10 @@ def main():
     print(f"Total: {len(results)}")
     print(f"Success: {success_count}")
     print(f"Failed: {len(results) - success_count}\n")
-    rna_count = sum(1 for r in results if 'rna' in r.get('components', {}))
+    nucleic_count = sum(1 for r in results if 'nucleic' in r.get('components', {}))
     protein_count = sum(1 for r in results if 'protein' in r.get('components', {}))
     complex_count = sum(1 for r in results if 'complex' in r.get('components', {}))
-    print(f"RNA pockets: {rna_count}")
+    print(f"Nucleic acid pockets: {nucleic_count}")
     print(f"Protein pockets: {protein_count}")
     print(f"Complex pockets: {complex_count}")
     results_file = output_dir / 'pocket_parameterization_results.json'
