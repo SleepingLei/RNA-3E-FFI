@@ -91,3 +91,4 @@ pdb-data-process/processed_ligands
 pdb-data-process/processed_polymers_fixed
 pdb-data-process/effect_receptor
 pdb-data-process/extracted_ligands
+processed_output/
