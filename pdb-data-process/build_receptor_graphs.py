@@ -233,9 +233,9 @@ def process_single_file(args):
 
 def main():
     parser = argparse.ArgumentParser(description='Build receptor graphs from AMBER files')
-    parser.add_argument('--amber-dir', default='effect_receptor_processed/amber',
+    parser.add_argument('--amber-dir', default='effect_receptor_parameterized/amber',
                         help='Directory containing AMBER files')
-    parser.add_argument('--output-dir', default='effect_receptor_processed',
+    parser.add_argument('--output-dir', default='effect_receptor_parameterized',
                         help='Output directory')
     parser.add_argument('--distance-cutoff', type=float, default=5.0,
                         help='Distance cutoff for non-bonded edges')

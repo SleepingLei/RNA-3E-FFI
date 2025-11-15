@@ -178,9 +178,9 @@ def main():
     parser = argparse.ArgumentParser(description='Parameterize receptors with AMBER')
     parser.add_argument('--receptor-dir', default='effect_receptor',
                         help='Directory containing receptor files')
-    parser.add_argument('--output-dir', default='effect_receptor_processed',
+    parser.add_argument('--output-dir', default='effect_receptor_parameterized',
                         help='Output directory')
-    parser.add_argument('--workers', type=int, default=None,
+    parser.add_argument('--workers', type=int, default=32,
                         help='Number of worker processes')
 
     args = parser.parse_args()
