@@ -285,6 +285,10 @@ class RNAPocketEncoderV3(nn.Module):
 
         # Fixed combining weights (不可学习，用户设定)
         # 改进：使用固定权重避免可学习权重与特征梯度的耦合
+        # 方案 1B: bonded 优先，确保总和 = 1.0
+        # bonded(0.4) + angle(0.2) + dihedral(0.2) + nonbonded(0.2) = 1.0
+        self.bonded_weight = 0.4  # 新增：bonded 路径的权重
+
         if use_multi_hop:
             self.angle_weight = initial_angle_weight
             self.dihedral_weight = initial_dihedral_weight
@@ -407,7 +411,7 @@ class RNAPocketEncoderV3(nn.Module):
                     )
                 self.nonbonded_mp_layers.append(layer)
 
-        # LayerNorm for stabilizing multi-hop aggregation (防止特征幅值爆炸)
+        # Pre-LayerNorm for stabilizing multi-hop aggregation (防止特征幅值爆炸)
         # 支持 RMSNorm (更快) 或 LayerNorm (with affine)
         if use_multi_hop or use_nonbonded:
             self.aggregation_layer_norms = nn.ModuleList()
@@ -427,6 +431,32 @@ class RNAPocketEncoderV3(nn.Module):
                 else:
                     # 使用本地的基础 EquivariantLayerNorm
                     self.aggregation_layer_norms.append(
+                        EquivariantLayerNorm(
+                            self.hidden_irreps,
+                            normalize_vectors=True,
+                            normalize_tensors=True,
+                            affine=True
+                        )
+                    )
+
+            # Post-LayerNorm: 在聚合后归一化，防止幅值累积（方案2）
+            self.post_aggregation_layer_norms = nn.ModuleList()
+            for i in range(num_layers):
+                if self.use_improved_layers:
+                    # 使用 layers/ 的改进版本
+                    if self.norm_type == 'rms':
+                        # RMSNorm (更快)
+                        self.post_aggregation_layer_norms.append(
+                            EquivariantRMSNorm(self.hidden_irreps, affine=True)
+                        )
+                    else:
+                        # LayerNorm with affine
+                        self.post_aggregation_layer_norms.append(
+                            LayersEquivariantLayerNorm(self.hidden_irreps, affine=True)
+                        )
+                else:
+                    # 使用本地的基础 EquivariantLayerNorm
+                    self.post_aggregation_layer_norms.append(
                         EquivariantLayerNorm(
                             self.hidden_irreps,
                             normalize_vectors=True,
@@ -552,7 +582,7 @@ class RNAPocketEncoderV3(nn.Module):
         # Initial embedding
         h = self.input_embedding(x)
 
-        # Message passing layers with Pre-LN architecture
+        # Message passing layers with Pre-LN + Post-LN architecture
         for i in range(self.num_layers):
             # Pre-LN: 先归一化再应用 MP
             if (self.use_multi_hop or self.use_nonbonded) and hasattr(self, 'aggregation_layer_norms'):
@@ -560,28 +590,33 @@ class RNAPocketEncoderV3(nn.Module):
             else:
                 h_normalized = h
 
-            # 1-hop bonded
+            # 1-hop bonded (方案 1B: 添加权重缩放)
             h_bonded = self.bonded_mp_layers[i](h_normalized, pos, edge_index, edge_attr)
-            h_new = h_bonded
+            h_new = self.bonded_weight * h_bonded  # 0.4
 
             # 2-hop angles (geometric features enabled)
             if self.use_multi_hop and hasattr(data, 'triple_index'):
                 h_angle = self.angle_mp_layers[i](h_normalized, pos, data.triple_index, data.triple_attr)
-                h_new = h_new + self.angle_weight * h_angle
+                h_new = h_new + self.angle_weight * h_angle  # +0.2
 
             # 3-hop dihedrals (geometric features enabled)
             if self.use_multi_hop and hasattr(data, 'quadra_index'):
                 h_dihedral = self.dihedral_mp_layers[i](h_normalized, pos, data.quadra_index, data.quadra_attr)
-                h_new = h_new + self.dihedral_weight * h_dihedral
+                h_new = h_new + self.dihedral_weight * h_dihedral  # +0.2
 
             # Non-bonded
             if self.use_nonbonded and hasattr(data, 'nonbonded_edge_index'):
                 h_nonbonded = self.nonbonded_mp_layers[i](
                     h_normalized, pos, data.nonbonded_edge_index, data.nonbonded_edge_attr
                 )
-                h_new = h_new + self.nonbonded_weight * h_nonbonded
+                h_new = h_new + self.nonbonded_weight * h_nonbonded  # +0.2
+
+            # Post-LN: 聚合后归一化，防止幅值累积（方案2）
+            if (self.use_multi_hop or self.use_nonbonded) and hasattr(self, 'post_aggregation_layer_norms'):
+                h_new = self.post_aggregation_layer_norms[i](h_new)
 
             # 残差连接 (Pre-LN 的关键)
+            # 总权重: 0.4 + 0.2 + 0.2 + 0.2 = 1.0，避免幅值累积
             h = h + h_new
 
             # Dropout on scalars only
@@ -682,9 +717,18 @@ class RNAPocketEncoderV3(nn.Module):
         stats = {}
 
         # 固定权重，无梯度
+        stats['bonded_weight'] = self.bonded_weight  # 新增
         stats['angle_weight'] = self.angle_weight
         stats['dihedral_weight'] = self.dihedral_weight
         stats['nonbonded_weight'] = self.nonbonded_weight
+
+        # 计算总权重（用于验证）
+        total_weight = self.bonded_weight
+        if self.use_multi_hop:
+            total_weight += self.angle_weight + self.dihedral_weight
+        if self.use_nonbonded:
+            total_weight += self.nonbonded_weight
+        stats['total_weight'] = total_weight
 
         return stats
 

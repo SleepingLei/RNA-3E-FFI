@@ -868,11 +868,26 @@ def train_worker(rank, world_size, args):
         print(f"  Multi-hop: {args.use_multi_hop}")
         print(f"  Non-bonded: {args.use_nonbonded}")
         print(f"  Pooling: {args.pooling_type}")
+
+        # Print all path weights (V3 improvement: bonded weight added)
+        print("\n  Path Weights (sum should = 1.0):")
+        if hasattr(model_for_params, 'bonded_weight'):
+            print(f"    Bonded:    {model_for_params.bonded_weight:.3f}")
         if args.use_multi_hop:
-            print(f"  Initial angle weight: {model_for_params.angle_weight:.3f}")
-            print(f"  Initial dihedral weight: {model_for_params.dihedral_weight:.3f}")
+            print(f"    Angle:     {model_for_params.angle_weight:.3f}")
+            print(f"    Dihedral:  {model_for_params.dihedral_weight:.3f}")
         if args.use_nonbonded:
-            print(f"  Initial nonbonded weight: {model_for_params.nonbonded_weight:.3f}")
+            print(f"    Nonbonded: {model_for_params.nonbonded_weight:.3f}")
+
+        # Calculate and display total weight
+        total_w = getattr(model_for_params, 'bonded_weight', 0.0)
+        if args.use_multi_hop:
+            total_w += model_for_params.angle_weight + model_for_params.dihedral_weight
+        if args.use_nonbonded:
+            total_w += model_for_params.nonbonded_weight
+        print(f"    Total:     {total_w:.3f} (target: 1.0)")
+        if abs(total_w - 1.0) > 0.01:
+            print(f"    ⚠️  Warning: Total weight deviates from 1.0!")
 
     # Initialize optimizer
     if args.optimizer == "adamw":
@@ -1092,39 +1107,27 @@ def train_worker(rank, world_size, args):
                 if 'nonbonded_energy' in train_metrics:
                     print(f"    Non-bonded: {train_metrics['nonbonded_energy']:.4f}")
 
-            # Print learnable weights if available (增强版，显示更多信息)
-            print("\n  📊 Learnable Weights Monitoring:")
+            # Print path weights (V3 improvement: fixed weights, no gradients)
+            print("\n  📊 Path Weights Monitoring (Fixed):")
+            if 'bonded_weight' in train_metrics:
+                print(f"    Bonded:    {train_metrics['bonded_weight']:.4f}")
             if 'angle_weight' in train_metrics:
-                log_val = train_metrics.get('log_angle_weight', 'N/A')
-                grad_val = train_metrics.get('angle_weight_grad', 'N/A')
-                print(f"    Angle:     weight={train_metrics['angle_weight']:.4f}, "
-                      f"log_space={log_val if isinstance(log_val, str) else f'{log_val:.4f}'}, "
-                      f"grad={grad_val if isinstance(grad_val, str) else f'{grad_val:.6f}'}")
+                print(f"    Angle:     {train_metrics['angle_weight']:.4f}")
                 weight_history['angle_weight'].append(train_metrics['angle_weight'])
-
             if 'dihedral_weight' in train_metrics:
-                log_val = train_metrics.get('log_dihedral_weight', 'N/A')
-                grad_val = train_metrics.get('dihedral_weight_grad', 'N/A')
-                print(f"    Dihedral:  weight={train_metrics['dihedral_weight']:.4f}, "
-                      f"log_space={log_val if isinstance(log_val, str) else f'{log_val:.4f}'}, "
-                      f"grad={grad_val if isinstance(grad_val, str) else f'{grad_val:.6f}'}")
+                print(f"    Dihedral:  {train_metrics['dihedral_weight']:.4f}")
                 weight_history['dihedral_weight'].append(train_metrics['dihedral_weight'])
 
             if 'nonbonded_weight' in train_metrics:
-                log_val = train_metrics.get('log_nonbonded_weight', 'N/A')
-                grad_val = train_metrics.get('nonbonded_weight_grad', 'N/A')
-                print(f"    Nonbonded: weight={train_metrics['nonbonded_weight']:.4f}, "
-                      f"log_space={log_val if isinstance(log_val, str) else f'{log_val:.4f}'}, "
-                      f"grad={grad_val if isinstance(grad_val, str) else f'{grad_val:.6f}'}")
+                print(f"    Nonbonded: {train_metrics['nonbonded_weight']:.4f}")
                 weight_history['nonbonded_weight'].append(train_metrics['nonbonded_weight'])
 
-            # 检查权重是否异常增长
-            if 'angle_weight' in train_metrics and train_metrics['angle_weight'] > 0.9:
-                print(f"    ⚠️  WARNING: Angle weight is very high ({train_metrics['angle_weight']:.4f})!")
-            if 'dihedral_weight' in train_metrics and train_metrics['dihedral_weight'] > 0.9:
-                print(f"    ⚠️  WARNING: Dihedral weight is very high ({train_metrics['dihedral_weight']:.4f})!")
-            if 'nonbonded_weight' in train_metrics and train_metrics['nonbonded_weight'] > 0.9:
-                print(f"    ⚠️  WARNING: Nonbonded weight is very high ({train_metrics['nonbonded_weight']:.4f})!")
+            # Display total weight (should = 1.0)
+            if 'total_weight' in train_metrics:
+                total_w = train_metrics['total_weight']
+                print(f"    Total:     {total_w:.4f} (target: 1.0)")
+                if abs(total_w - 1.0) > 0.01:
+                    print(f"    ⚠️  WARNING: Total weight deviates from 1.0!")
 
         # Validate
         val_metrics = evaluate(

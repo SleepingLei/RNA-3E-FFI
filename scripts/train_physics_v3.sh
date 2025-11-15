@@ -21,7 +21,7 @@ python scripts/04_train_model.py \
     --num_layers 6 --use_layer_norm --dropout 0.1 \
     --output_dir models/physics_v3_6_0.1_new_improve_multihead_retry_plateau_scheduler \
     --use_ddp --world_size 4 --splits_file data/splits/filtered_splits.json \
-    --use_v3_model --num_attention_heads 8 --grad_clip 1.0 --initial_angle_weight 0.33 --initial_dihedral_weight 0.33 --initial_nonbonded_weight 0.33 \
+    --use_v3_model --num_attention_heads 8 --grad_clip 1.0 --initial_angle_weight 0.2 --initial_dihedral_weight 0.2 --initial_nonbonded_weight 0.2 \
     --use_enhanced_invariants \
     --scheduler plateau \
     #--use_improved_layers \
