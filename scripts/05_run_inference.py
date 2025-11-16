@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Inference Script for RNA Pocket Encoder V2
+Inference Script for RNA Pocket Encoder V2/V3
 
-This script uses the trained v2 model to predict pocket embeddings and
+This script uses the trained v2/v3 model to predict pocket embeddings and
 find similar ligands from a pre-computed library.
 """
 import os
@@ -14,16 +14,32 @@ import numpy as np
 import torch
 import h5py
 from tqdm import tqdm
+import warnings
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
+
+# Import V3 improvements
+try:
+    from models.e3_gnn_encoder_v3 import RNAPocketEncoderV3
+    _has_v3_model = True
+except ImportError:
+    _has_v3_model = False
+    warnings.warn("V3 model not available. Only V2 model will be supported.")
+
+# V2 models (backward compatible)
+try:
+    from models.e3_gnn_encoder_v2_fixed import RNAPocketEncoderV2Fixed
+    _has_v2_fixed = True
+except ImportError:
+    _has_v2_fixed = False
+
 from models.e3_gnn_encoder_v2 import RNAPocketEncoderV2
-# AMBER vocabulary removed - using pure physical features
 
 
 def load_model(checkpoint_path, device):
     """
-    Load trained v2 model from checkpoint.
+    Load trained v2/v3 model from checkpoint.
 
     Args:
         checkpoint_path: Path to model checkpoint
@@ -35,7 +51,7 @@ def load_model(checkpoint_path, device):
     print(f"Loading model from {checkpoint_path}...")
 
     # Load checkpoint
-    checkpoint = torch.load(checkpoint_path, map_location=device)
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
 
     # Get model config from checkpoint or config.json
     config = checkpoint.get('config', {})
@@ -50,28 +66,96 @@ def load_model(checkpoint_path, device):
         with open(config_json_path, 'r') as f:
             file_config = json.load(f)
             # Merge configs, preferring file config for model architecture params
-            for key in ['input_dim', 'feature_hidden_dim', 'hidden_irreps',
-                       'output_dim', 'num_layers', 'use_multi_hop', 'use_nonbonded',
-                       'pooling_type', 'use_layer_norm', 'dropout']:
+            config_keys = [
+                'input_dim', 'feature_hidden_dim', 'hidden_irreps',
+                'output_dim', 'num_layers', 'num_radial_basis',
+                'use_multi_hop', 'use_nonbonded', 'use_gate',
+                'pooling_type', 'use_layer_norm', 'dropout',
+                # V3-specific
+                'use_v3_model', 'use_enhanced_invariants', 'use_improved_layers',
+                'norm_type', 'num_attention_heads',
+                'initial_angle_weight', 'initial_dihedral_weight', 'initial_nonbonded_weight',
+                'use_weight_constraints'
+            ]
+            for key in config_keys:
                 if key in file_config:
                     config[key] = file_config[key]
     elif not config:
         raise ValueError("Checkpoint does not contain model configuration and no config.json found. "
-                       "Please use a checkpoint saved with v2 training script.")
+                       "Please use a checkpoint saved with v2/v3 training script.")
 
-    # Initialize model with config from checkpoint (Pure Physical Features)
-    model = RNAPocketEncoderV2(
-        input_dim=config.get('input_dim', 3),
-        feature_hidden_dim=config.get('feature_hidden_dim', 64),
-        hidden_irreps=config.get('hidden_irreps', '32x0e + 16x1o + 8x2e'),
-        output_dim=config.get('output_dim', 512),
-        num_layers=config.get('num_layers', 4),
-        use_multi_hop=config.get('use_multi_hop', True),
-        use_nonbonded=config.get('use_nonbonded', True),
-        use_layer_norm=config.get('use_layer_norm', False),
-        pooling_type=config.get('pooling_type', 'attention'),
-        dropout=config.get('dropout', 0.0)
-    )
+    # Determine model version
+    use_v3 = config.get('use_v3_model', False)
+    use_weight_constraints = config.get('use_weight_constraints', False)
+
+    print(f"  Model version: {'V3' if use_v3 else 'V2' + (' (Fixed)' if use_weight_constraints else '')}")
+    print(f"  Training epoch: {checkpoint.get('epoch', 'unknown')}")
+    print(f"  Validation loss: {checkpoint.get('val_loss', 'unknown')}")
+
+    # Initialize model with config from checkpoint
+    if use_v3 and _has_v3_model:
+        print("  Using RNAPocketEncoderV3")
+
+        # V3-specific pooling type override
+        pooling_type = config.get('pooling_type', 'attention')
+        num_attention_heads = config.get('num_attention_heads', 4)
+        if num_attention_heads > 1:
+            pooling_type = 'multihead_attention'
+
+        model = RNAPocketEncoderV3(
+            input_dim=config.get('input_dim', 3),
+            feature_hidden_dim=config.get('feature_hidden_dim', 64),
+            hidden_irreps=config.get('hidden_irreps', '32x0e + 16x1o + 8x2e'),
+            output_dim=config.get('output_dim', 1536),
+            num_layers=config.get('num_layers', 6),
+            num_radial_basis=config.get('num_radial_basis', 8),
+            use_multi_hop=config.get('use_multi_hop', True),
+            use_nonbonded=config.get('use_nonbonded', True),
+            use_gate=config.get('use_gate', True),
+            use_layer_norm=config.get('use_layer_norm', True),
+            pooling_type=pooling_type,
+            dropout=config.get('dropout', 0.1),
+            # V3-specific parameters
+            use_enhanced_invariants=config.get('use_enhanced_invariants', False),
+            num_attention_heads=num_attention_heads,
+            initial_angle_weight=config.get('initial_angle_weight', 0.5),
+            initial_dihedral_weight=config.get('initial_dihedral_weight', 0.5),
+            initial_nonbonded_weight=config.get('initial_nonbonded_weight', 0.5),
+            use_improved_layers=config.get('use_improved_layers', False),
+            norm_type=config.get('norm_type', 'layer')
+        )
+    elif use_weight_constraints and _has_v2_fixed:
+        print("  Using RNAPocketEncoderV2Fixed (with weight constraints)")
+        model = RNAPocketEncoderV2Fixed(
+            input_dim=config.get('input_dim', 3),
+            feature_hidden_dim=config.get('feature_hidden_dim', 64),
+            hidden_irreps=config.get('hidden_irreps', '32x0e + 16x1o + 8x2e'),
+            output_dim=config.get('output_dim', 512),
+            num_layers=config.get('num_layers', 4),
+            num_radial_basis=config.get('num_radial_basis', 8),
+            use_multi_hop=config.get('use_multi_hop', True),
+            use_nonbonded=config.get('use_nonbonded', True),
+            use_gate=config.get('use_gate', True),
+            use_layer_norm=config.get('use_layer_norm', False),
+            pooling_type=config.get('pooling_type', 'attention'),
+            dropout=config.get('dropout', 0.0)
+        )
+    else:
+        print("  Using RNAPocketEncoderV2 (standard)")
+        model = RNAPocketEncoderV2(
+            input_dim=config.get('input_dim', 3),
+            feature_hidden_dim=config.get('feature_hidden_dim', 64),
+            hidden_irreps=config.get('hidden_irreps', '32x0e + 16x1o + 8x2e'),
+            output_dim=config.get('output_dim', 512),
+            num_layers=config.get('num_layers', 4),
+            num_radial_basis=config.get('num_radial_basis', 8),
+            use_multi_hop=config.get('use_multi_hop', True),
+            use_nonbonded=config.get('use_nonbonded', True),
+            use_gate=config.get('use_gate', True),
+            use_layer_norm=config.get('use_layer_norm', False),
+            pooling_type=config.get('pooling_type', 'attention'),
+            dropout=config.get('dropout', 0.0)
+        )
 
     # Load model weights
     model.load_state_dict(checkpoint['model_state_dict'])
@@ -79,9 +163,8 @@ def load_model(checkpoint_path, device):
     model = model.to(device)
     model.eval()
 
-    epoch = checkpoint.get('epoch', 'unknown')
-    best_val_loss = checkpoint.get('best_val_loss', 'unknown')
-    print(f"Model loaded successfully (epoch {epoch}, best val loss: {best_val_loss})")
+    print(f"✓ Model loaded successfully")
+    print(f"  Parameters: {sum(p.numel() for p in model.parameters()):,}")
 
     return model, config
 
