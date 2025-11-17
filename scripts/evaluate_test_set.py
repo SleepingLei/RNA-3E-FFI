@@ -135,7 +135,7 @@ def load_model_from_checkpoint(checkpoint_path, device='cpu'):
             input_dim=config.get('input_dim', 3),
             feature_hidden_dim=config.get('feature_hidden_dim', 64),
             hidden_irreps=config.get('hidden_irreps', '32x0e + 16x1o + 8x2e'),
-            output_dim=config.get('output_dim', 512),
+            output_dim=config.get('output_dim', 1536),
             num_layers=config.get('num_layers', 4),
             num_radial_basis=config.get('num_radial_basis', 8),
             use_multi_hop=config.get('use_multi_hop', True),
@@ -151,7 +151,7 @@ def load_model_from_checkpoint(checkpoint_path, device='cpu'):
             input_dim=config.get('input_dim', 3),
             feature_hidden_dim=config.get('feature_hidden_dim', 64),
             hidden_irreps=config.get('hidden_irreps', '32x0e + 16x1o + 8x2e'),
-            output_dim=config.get('output_dim', 512),
+            output_dim=config.get('output_dim', 1536),
             num_layers=config.get('num_layers', 4),
             num_radial_basis=config.get('num_radial_basis', 8),
             use_multi_hop=config.get('use_multi_hop', True),
@@ -570,7 +570,7 @@ def main():
     # Required arguments
     parser.add_argument("--checkpoint", type=str, required=True,
                         help="Path to model checkpoint")
-    parser.add_argument("--splits", type=str, default="data/splits/splits.json",
+    parser.add_argument("--splits", type=str, default="data/splits/filtered_splits.json",
                         help="Path to splits.json file")
     parser.add_argument("--graph_dir", type=str, default="data/processed/graphs",
                         help="Directory containing graph files")

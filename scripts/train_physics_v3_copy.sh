@@ -16,10 +16,11 @@ python scripts/04_train_model.py \
     --use_gate \
     --save_every 5 \
     --loss_fn mse --monitor_gradients \
-    --num_layers 6 --use_layer_norm --dropout 0.15 \
-    --output_dir models/bonded-Improved_layers-multi_hop-non_bonded-multihead \
+    --num_layers 6 --use_layer_norm --dropout 0.1 \
+    --output_dir models/bonded-Improved_layers-Enhanved_invariants-multi_hop-non_bonded-multihead \
     --use_ddp --world_size 4 --splits_file data/splits/filtered_splits.json \
     --use_v3_model --num_attention_heads 8 --grad_clip 2.0 \
+    --use_enhanced_invariants \
     --scheduler none \
     --use_improved_layers \
     --initial_angle_weight 0.2 \
@@ -27,7 +28,6 @@ python scripts/04_train_model.py \
     --initial_nonbonded_weight 0.2 \
     --use_multi_hop \
     --use_nonbonded \
-    #--use_enhanced_invariants \
     #--use_physics_loss \
     #--resume --checkpoint models/physics_v3_6_0.1/checkpoint_epoch_120.pt
     #--accumulation_step 2 \

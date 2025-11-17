@@ -16,16 +16,16 @@ set -e  # Exit on error
 # ============================================================================
 
 # Default paths
-CHECKPOINT="${CHECKPOINT:-models/checkpoints_mse_1536_6_dropout_0.1_retry/best_model.pt}"
+CHECKPOINT="${CHECKPOINT:-models/bonded-Improved_layers-Enhanved_invariants-multi_hop-non_bonded-multihead/best_model.pt}"
 GRAPH_DIR="${GRAPH_DIR:-data/processed/graphs}"
 LIGAND_EMBEDDINGS="${LIGAND_EMBEDDINGS:-data/processed/ligand_embeddings_dedup.h5}"
-OUTPUT_DIR="${OUTPUT_DIR:-results/embedding_analysis_retry_train}"
+OUTPUT_DIR="${OUTPUT_DIR:-results/bonded-Improved_layers-Enhanved_invariants-multi_hop-non_bonded-multihead}"
 
 # Visualization methods (pca tsne umap)
 METHODS="${METHODS:-pca tsne}"
 
 # Split selection (empty means all data)
-SPLITS_FILE="${SPLITS_FILE:-}"
+SPLITS_FILE="${SPLITS_FILE:-data/splits/filtered_splits.json}"
 SPLITS="${SPLITS:-}"
 
 # ============================================================================

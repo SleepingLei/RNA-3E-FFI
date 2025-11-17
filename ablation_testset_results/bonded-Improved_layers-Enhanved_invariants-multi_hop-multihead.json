@@ -1,0 +1,1385 @@
+{
+  "total_samples": 122,
+  "successful_predictions": 122,
+  "failed_predictions": [],
+  "metric": "euclidean",
+  "total_ligands": 291,
+  "hit_rates": {
+    "top5%": {
+      "hits": 32,
+      "misses": 90,
+      "hit_rate": 26.229508196721312,
+      "k_value": 14
+    },
+    "top10%": {
+      "hits": 44,
+      "misses": 78,
+      "hit_rate": 36.0655737704918,
+      "k_value": 29
+    },
+    "top20%": {
+      "hits": 57,
+      "misses": 65,
+      "hit_rate": 46.72131147540984,
+      "k_value": 58
+    }
+  },
+  "detailed_results": [
+    {
+      "complex_id": "4far_EPE_model0",
+      "true_ligand_id": "EPE",
+      "rank": 61,
+      "distance": 18.836395263671875,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "6gyv_MES_model0",
+      "true_ligand_id": "MES",
+      "rank": 119,
+      "distance": 26.558046340942383,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "7fhi_53D_model7",
+      "true_ligand_id": "53D",
+      "rank": 44,
+      "distance": 17.211881637573242,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "7rwr_FMN_model1",
+      "true_ligand_id": "FMN",
+      "rank": 126,
+      "distance": 36.281463623046875,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "8r62_Y59_model10",
+      "true_ligand_id": "Y59",
+      "rank": 3,
+      "distance": 17.498567581176758,
+      "hits": {
+        "top5%": true,
+        "top10%": true,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "1uts_P13_model4",
+      "true_ligand_id": "P13",
+      "rank": 124,
+      "distance": 32.413761138916016,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "2miy_PRF_model8",
+      "true_ligand_id": "PRF",
+      "rank": 78,
+      "distance": 20.9307918548584,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "6hmo_GDZ_model9",
+      "true_ligand_id": "GDZ",
+      "rank": 3,
+      "distance": 13.57617473602295,
+      "hits": {
+        "top5%": true,
+        "top10%": true,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "7fj0_53D_model3",
+      "true_ligand_id": "53D",
+      "rank": 1,
+      "distance": 17.711212158203125,
+      "hits": {
+        "top5%": true,
+        "top10%": true,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "2mxs_PAR_model11",
+      "true_ligand_id": "PAR",
+      "rank": 1,
+      "distance": 18.27818489074707,
+      "hits": {
+        "top5%": true,
+        "top10%": true,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "6hag_SAH_model3",
+      "true_ligand_id": "SAH",
+      "rank": 99,
+      "distance": 26.004438400268555,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "8yno_SPM_model0",
+      "true_ligand_id": "SPM",
+      "rank": 159,
+      "distance": 44.61245346069336,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "8oly_EPE_model0",
+      "true_ligand_id": "EPE",
+      "rank": 102,
+      "distance": 23.498687744140625,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "5dm7_HGR_model0",
+      "true_ligand_id": "HGR",
+      "rank": 173,
+      "distance": 46.9359016418457,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "4r0d_SPM_model0",
+      "true_ligand_id": "SPM",
+      "rank": 189,
+      "distance": 40.73356246948242,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "8g6x_SPM_model0",
+      "true_ligand_id": "SPM",
+      "rank": 202,
+      "distance": 39.715579986572266,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "6dmd_G4P_model0",
+      "true_ligand_id": "G4P",
+      "rank": 109,
+      "distance": 34.42021942138672,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "5vcf_8OS_model0",
+      "true_ligand_id": "8OS",
+      "rank": 33,
+      "distance": 15.779545783996582,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "1fyp_PAR_model21",
+      "true_ligand_id": "PAR",
+      "rank": 6,
+      "distance": 16.729055404663086,
+      "hits": {
+        "top5%": true,
+        "top10%": true,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "6mpi_PAR_model0",
+      "true_ligand_id": "PAR",
+      "rank": 5,
+      "distance": 19.654083251953125,
+      "hits": {
+        "top5%": true,
+        "top10%": true,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "2mxs_PAR_model2",
+      "true_ligand_id": "PAR",
+      "rank": 4,
+      "distance": 15.195648193359375,
+      "hits": {
+        "top5%": true,
+        "top10%": true,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "3ges_6GO_model0",
+      "true_ligand_id": "6GO",
+      "rank": 137,
+      "distance": 36.905094146728516,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "8r8p_YB3_model14",
+      "true_ligand_id": "YB3",
+      "rank": 27,
+      "distance": 15.701227188110352,
+      "hits": {
+        "top5%": false,
+        "top10%": true,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "8r63_Y53_model14",
+      "true_ligand_id": "Y53",
+      "rank": 80,
+      "distance": 21.55789566040039,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "8cf2_ULR_model12",
+      "true_ligand_id": "ULR",
+      "rank": 135,
+      "distance": 35.04100036621094,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "6hmo_GDZ_model12",
+      "true_ligand_id": "GDZ",
+      "rank": 6,
+      "distance": 13.44800090789795,
+      "hits": {
+        "top5%": true,
+        "top10%": true,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "1uts_P13_model12",
+      "true_ligand_id": "P13",
+      "rank": 135,
+      "distance": 35.67710876464844,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "1lvj_PMZ_model10",
+      "true_ligand_id": "PMZ",
+      "rank": 59,
+      "distance": 19.015214920043945,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "8r63_Y53_model1",
+      "true_ligand_id": "Y53",
+      "rank": 74,
+      "distance": 21.546119689941406,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "1arj_ARG_model19",
+      "true_ligand_id": "ARG",
+      "rank": 21,
+      "distance": 13.931654930114746,
+      "hits": {
+        "top5%": false,
+        "top10%": true,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "8i46_53D_model6",
+      "true_ligand_id": "53D",
+      "rank": 110,
+      "distance": 39.78162384033203,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "2cky_TPP_model0",
+      "true_ligand_id": "TPP",
+      "rank": 34,
+      "distance": 19.44094467163086,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "2miy_PRF_model10",
+      "true_ligand_id": "PRF",
+      "rank": 119,
+      "distance": 28.21150016784668,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "2ktz_ISH_model8",
+      "true_ligand_id": "ISH",
+      "rank": 48,
+      "distance": 16.952604293823242,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "2n0j_RIO_model12",
+      "true_ligand_id": "RIO",
+      "rank": 5,
+      "distance": 13.934688568115234,
+      "hits": {
+        "top5%": true,
+        "top10%": true,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "2miy_PRF_model7",
+      "true_ligand_id": "PRF",
+      "rank": 84,
+      "distance": 21.5378475189209,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "4lvy_LYA_model0",
+      "true_ligand_id": "LYA",
+      "rank": 24,
+      "distance": 21.68122673034668,
+      "hits": {
+        "top5%": false,
+        "top10%": true,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "8s1p_CLM_model0",
+      "true_ligand_id": "CLM",
+      "rank": 70,
+      "distance": 19.521148681640625,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "5fk4_SAM_model0",
+      "true_ligand_id": "SAM",
+      "rank": 37,
+      "distance": 17.79768943786621,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "3mur_C2E_model0",
+      "true_ligand_id": "C2E",
+      "rank": 51,
+      "distance": 26.64956283569336,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "1ei2_NMY_model13",
+      "true_ligand_id": "NMY",
+      "rank": 1,
+      "distance": 14.458580017089844,
+      "hits": {
+        "top5%": true,
+        "top10%": true,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "1aju_ARG_model4",
+      "true_ligand_id": "ARG",
+      "rank": 67,
+      "distance": 18.717945098876953,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "8r63_Y53_model9",
+      "true_ligand_id": "Y53",
+      "rank": 83,
+      "distance": 21.9320011138916,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "3fu2_PRF_model0",
+      "true_ligand_id": "PRF",
+      "rank": 97,
+      "distance": 22.27501678466797,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "2miy_PRF_model11",
+      "true_ligand_id": "PRF",
+      "rank": 92,
+      "distance": 21.85264015197754,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "1raw_AMP_model3",
+      "true_ligand_id": "AMP",
+      "rank": 35,
+      "distance": 15.677592277526855,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "6hag_SAH_model0",
+      "true_ligand_id": "SAH",
+      "rank": 100,
+      "distance": 26.282638549804688,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "1xnq_PAR_model0",
+      "true_ligand_id": "PAR",
+      "rank": 12,
+      "distance": 24.48203468322754,
+      "hits": {
+        "top5%": true,
+        "top10%": true,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "6hmo_GDZ_model6",
+      "true_ligand_id": "GDZ",
+      "rank": 7,
+      "distance": 13.779172897338867,
+      "hits": {
+        "top5%": true,
+        "top10%": true,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "8r8p_YB3_model6",
+      "true_ligand_id": "YB3",
+      "rank": 29,
+      "distance": 16.04591941833496,
+      "hits": {
+        "top5%": false,
+        "top10%": true,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "7kvt_2ZY_model0",
+      "true_ligand_id": "2ZY",
+      "rank": 103,
+      "distance": 24.753067016601562,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "2l1v_PRF_model7",
+      "true_ligand_id": "PRF",
+      "rank": 5,
+      "distance": 15.50691032409668,
+      "hits": {
+        "top5%": true,
+        "top10%": true,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "6ddg_G6M_model0",
+      "true_ligand_id": "G6M",
+      "rank": 220,
+      "distance": 52.861305236816406,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "2ku0_ISI_model5",
+      "true_ligand_id": "ISI",
+      "rank": 19,
+      "distance": 15.889460563659668,
+      "hits": {
+        "top5%": false,
+        "top10%": true,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "8i46_53D_model5",
+      "true_ligand_id": "53D",
+      "rank": 112,
+      "distance": 39.67915344238281,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "2vqf_PAR_model0",
+      "true_ligand_id": "PAR",
+      "rank": 5,
+      "distance": 19.2318115234375,
+      "hits": {
+        "top5%": true,
+        "top10%": true,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "6pc7_O7V_model0",
+      "true_ligand_id": "O7V",
+      "rank": 290,
+      "distance": 61.27513122558594,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "2juk_G0B_model9",
+      "true_ligand_id": "G0B",
+      "rank": 8,
+      "distance": 21.715904235839844,
+      "hits": {
+        "top5%": true,
+        "top10%": true,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "8i44_53D_model6",
+      "true_ligand_id": "53D",
+      "rank": 155,
+      "distance": 51.33433532714844,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "1uts_P13_model13",
+      "true_ligand_id": "P13",
+      "rank": 129,
+      "distance": 34.48352813720703,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "1q8n_MGR_model10",
+      "true_ligand_id": "MGR",
+      "rank": 38,
+      "distance": 21.602922439575195,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "6dn3_GZ4_model0",
+      "true_ligand_id": "GZ4",
+      "rank": 196,
+      "distance": 42.467777252197266,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "2mxs_PAR_model15",
+      "true_ligand_id": "PAR",
+      "rank": 20,
+      "distance": 23.82110595703125,
+      "hits": {
+        "top5%": false,
+        "top10%": true,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "6c8k_EQ1_model0",
+      "true_ligand_id": "EQ1",
+      "rank": 196,
+      "distance": 46.41400909423828,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "9c4g_CLY_model0",
+      "true_ligand_id": "CLY",
+      "rank": 70,
+      "distance": 36.82707977294922,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "4faw_EPE_model0",
+      "true_ligand_id": "EPE",
+      "rank": 62,
+      "distance": 18.77850914001465,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "8i7n_OJI_model0",
+      "true_ligand_id": "OJI",
+      "rank": 53,
+      "distance": 27.29709815979004,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "8khh_GMP_model0",
+      "true_ligand_id": "GMP",
+      "rank": 12,
+      "distance": 13.710755348205566,
+      "hits": {
+        "top5%": true,
+        "top10%": true,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "8vpk_ERY_model0",
+      "true_ligand_id": "ERY",
+      "rank": 227,
+      "distance": 59.533782958984375,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "1uts_P13_model3",
+      "true_ligand_id": "P13",
+      "rank": 90,
+      "distance": 26.571308135986328,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "1arj_ARG_model13",
+      "true_ligand_id": "ARG",
+      "rank": 14,
+      "distance": 13.637957572937012,
+      "hits": {
+        "top5%": true,
+        "top10%": true,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "6hmo_GDZ_model0",
+      "true_ligand_id": "GDZ",
+      "rank": 3,
+      "distance": 15.130819320678711,
+      "hits": {
+        "top5%": true,
+        "top10%": true,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "3gx7_SAM_model0",
+      "true_ligand_id": "SAM",
+      "rank": 58,
+      "distance": 19.16816520690918,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "9ios_53D_model5",
+      "true_ligand_id": "53D",
+      "rank": 129,
+      "distance": 57.28806686401367,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "1fyp_PAR_model15",
+      "true_ligand_id": "PAR",
+      "rank": 1,
+      "distance": 14.667508125305176,
+      "hits": {
+        "top5%": true,
+        "top10%": true,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "7rwr_FMN_model7",
+      "true_ligand_id": "FMN",
+      "rank": 205,
+      "distance": 56.82711410522461,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "4fau_EPE_model0",
+      "true_ligand_id": "EPE",
+      "rank": 102,
+      "distance": 23.77609634399414,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "6hmo_GDZ_model1",
+      "true_ligand_id": "GDZ",
+      "rank": 3,
+      "distance": 12.671224594116211,
+      "hits": {
+        "top5%": true,
+        "top10%": true,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "2gdi_TPP_model0",
+      "true_ligand_id": "TPP",
+      "rank": 66,
+      "distance": 25.509868621826172,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "1aju_ARG_model3",
+      "true_ligand_id": "ARG",
+      "rank": 16,
+      "distance": 13.488200187683105,
+      "hits": {
+        "top5%": false,
+        "top10%": true,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "2kxm_RIO_model5",
+      "true_ligand_id": "RIO",
+      "rank": 3,
+      "distance": 12.68710994720459,
+      "hits": {
+        "top5%": true,
+        "top10%": true,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "4p20_AKN_model0",
+      "true_ligand_id": "AKN",
+      "rank": 258,
+      "distance": 61.7844352722168,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "2miy_PRF_model3",
+      "true_ligand_id": "PRF",
+      "rank": 69,
+      "distance": 20.342397689819336,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "1q8n_MGR_model15",
+      "true_ligand_id": "MGR",
+      "rank": 7,
+      "distance": 18.54474639892578,
+      "hits": {
+        "top5%": true,
+        "top10%": true,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "7eaf_SAM_model0",
+      "true_ligand_id": "SAM",
+      "rank": 7,
+      "distance": 16.02213478088379,
+      "hits": {
+        "top5%": true,
+        "top10%": true,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "1akx_ARG_model0",
+      "true_ligand_id": "ARG",
+      "rank": 116,
+      "distance": 32.031822204589844,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "5fk3_SAM_model0",
+      "true_ligand_id": "SAM",
+      "rank": 83,
+      "distance": 36.79051208496094,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "6tf0_NAI_model0",
+      "true_ligand_id": "NAI",
+      "rank": 230,
+      "distance": 50.67942428588867,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "4faq_EPE_model0",
+      "true_ligand_id": "EPE",
+      "rank": 102,
+      "distance": 23.852428436279297,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "9ior_53D_model2",
+      "true_ligand_id": "53D",
+      "rank": 120,
+      "distance": 56.634552001953125,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "5wnt_B6M_model0",
+      "true_ligand_id": "B6M",
+      "rank": 16,
+      "distance": 31.490571975708008,
+      "hits": {
+        "top5%": false,
+        "top10%": true,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "8f4o_PG4_model0",
+      "true_ligand_id": "PG4",
+      "rank": 109,
+      "distance": 43.0999641418457,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "1raw_AMP_model5",
+      "true_ligand_id": "AMP",
+      "rank": 27,
+      "distance": 15.1232271194458,
+      "hits": {
+        "top5%": false,
+        "top10%": true,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "8hzm_NI4_model0",
+      "true_ligand_id": "NI4",
+      "rank": 230,
+      "distance": 47.40108871459961,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "6c64_EKM_model0",
+      "true_ligand_id": "EKM",
+      "rank": 99,
+      "distance": 37.81192398071289,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "3iqn_SAM_model0",
+      "true_ligand_id": "SAM",
+      "rank": 1,
+      "distance": 16.225643157958984,
+      "hits": {
+        "top5%": true,
+        "top10%": true,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "8ruk_VTR_model0",
+      "true_ligand_id": "VTR",
+      "rank": 203,
+      "distance": 40.59210205078125,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "3dir_IEL_model0",
+      "true_ligand_id": "IEL",
+      "rank": 121,
+      "distance": 27.953964233398438,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "7fhi_53D_model1",
+      "true_ligand_id": "53D",
+      "rank": 27,
+      "distance": 17.61020851135254,
+      "hits": {
+        "top5%": false,
+        "top10%": true,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "6gzk_FH8_model4",
+      "true_ligand_id": "FH8",
+      "rank": 1,
+      "distance": 19.39613151550293,
+      "hits": {
+        "top5%": true,
+        "top10%": true,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "2juk_G0B_model10",
+      "true_ligand_id": "G0B",
+      "rank": 7,
+      "distance": 21.588075637817383,
+      "hits": {
+        "top5%": true,
+        "top10%": true,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "1am0_AMP_model0",
+      "true_ligand_id": "AMP",
+      "rank": 80,
+      "distance": 23.310544967651367,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "3b4a_GLP_model0",
+      "true_ligand_id": "GLP",
+      "rank": 90,
+      "distance": 28.866451263427734,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "9ior_53D_model0",
+      "true_ligand_id": "53D",
+      "rank": 122,
+      "distance": 56.961368560791016,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "2kgp_MIX_model6",
+      "true_ligand_id": "MIX",
+      "rank": 12,
+      "distance": 22.41208839416504,
+      "hits": {
+        "top5%": true,
+        "top10%": true,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "8eyw_TFX_model0",
+      "true_ligand_id": "TFX",
+      "rank": 119,
+      "distance": 48.8681755065918,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "2miy_PRF_model17",
+      "true_ligand_id": "PRF",
+      "rank": 88,
+      "distance": 21.789731979370117,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "6n5k_2BA_model0",
+      "true_ligand_id": "2BA",
+      "rank": 2,
+      "distance": 19.861553192138672,
+      "hits": {
+        "top5%": true,
+        "top10%": true,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "2l94_L94_model3",
+      "true_ligand_id": "L94",
+      "rank": 7,
+      "distance": 18.06328010559082,
+      "hits": {
+        "top5%": true,
+        "top10%": true,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "6hag_SAH_model6",
+      "true_ligand_id": "SAH",
+      "rank": 100,
+      "distance": 26.32876968383789,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "1kod_CIR_model0",
+      "true_ligand_id": "CIR",
+      "rank": 240,
+      "distance": 54.330318450927734,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "7fj0_53D_model4",
+      "true_ligand_id": "53D",
+      "rank": 1,
+      "distance": 25.403762817382812,
+      "hits": {
+        "top5%": true,
+        "top10%": true,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "8znq_NAZ_model6",
+      "true_ligand_id": "NAZ",
+      "rank": 46,
+      "distance": 16.510629653930664,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "1fyp_PAR_model11",
+      "true_ligand_id": "PAR",
+      "rank": 1,
+      "distance": 11.69933795928955,
+      "hits": {
+        "top5%": true,
+        "top10%": true,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "2l1v_PRF_model18",
+      "true_ligand_id": "PRF",
+      "rank": 25,
+      "distance": 16.941272735595703,
+      "hits": {
+        "top5%": false,
+        "top10%": true,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "3d2g_TPP_model0",
+      "true_ligand_id": "TPP",
+      "rank": 143,
+      "distance": 45.50040817260742,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "1j5a_CTY_model0",
+      "true_ligand_id": "CTY",
+      "rank": 225,
+      "distance": 47.71438980102539,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "8r62_Y59_model4",
+      "true_ligand_id": "Y59",
+      "rank": 1,
+      "distance": 16.5792293548584,
+      "hits": {
+        "top5%": true,
+        "top10%": true,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "8toz_PRF_model0",
+      "true_ligand_id": "PRF",
+      "rank": 203,
+      "distance": 58.02124786376953,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": false
+      }
+    },
+    {
+      "complex_id": "9c6k_TPP_model0",
+      "true_ligand_id": "TPP",
+      "rank": 23,
+      "distance": 15.76258373260498,
+      "hits": {
+        "top5%": false,
+        "top10%": true,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "7fhi_53D_model4",
+      "true_ligand_id": "53D",
+      "rank": 37,
+      "distance": 16.97300148010254,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": true
+      }
+    },
+    {
+      "complex_id": "8znq_NAZ_model9",
+      "true_ligand_id": "NAZ",
+      "rank": 46,
+      "distance": 16.657623291015625,
+      "hits": {
+        "top5%": false,
+        "top10%": false,
+        "top20%": true
+      }
+    }
+  ],
+  "rank_statistics": {
+    "mean_rank": 77.65573770491804,
+    "median_rank": 66.5,
+    "min_rank": 1,
+    "max_rank": 290,
+    "std_rank": 70.70218890712698
+  },
+  "distance_statistics": {
+    "mean_distance": 27.36515998840332,
+    "median_distance": 21.821186065673828,
+    "min_distance": 11.69933795928955,
+    "max_distance": 61.7844352722168,
+    "std_distance": 13.41031551361084
+  }
+}
